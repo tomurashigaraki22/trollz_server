@@ -1,223 +1,180 @@
-# How to Add Sendbox API Key
+# Sendbox Authentication Configuration
 
-## Issue
-You're seeing this warning:
-```
-WARNING:services.sendbox_service:Sendbox API key not configured!
-```
+## ✅ TOKEN AUTHENTICATION NOW ACTIVE
 
-This means the Sendbox API key is missing from your environment variables.
+Your Sendbox integration now uses **OAuth 2.0 token-based authentication** with automatic token refresh. The tokens are already configured and hardcoded in the system.
 
----
+## Current Authentication Method
 
-## Solution
+### Token-Based Authentication (Active)
+- **Access Token**: Hardcoded in `services/sendbox_service.py`
+- **Refresh Token**: Hardcoded in `services/sendbox_service.py`
+- **Client Secret**: Hardcoded in `services/sendbox_service.py`
+- **Auto-Refresh**: Enabled (tokens refresh automatically before expiry)
 
-### Step 1: Get Your Sendbox API Key
+### How It Works
+1. System uses hardcoded access token for API requests
+2. Before each request, checks if token expires in < 5 minutes
+3. If expiring soon, automatically refreshes using refresh token
+4. New access token is used for subsequent requests
+5. No manual intervention required
 
-1. Go to **Sendbox Staging Portal**: https://developers.staging.sendbox.co/
-2. Sign up or log in
-3. Create an application
-4. Copy your API key
+## Verify Token Authentication
 
-### Step 2: Add to .env File
-
-Open your `.env` file and add:
-
-```bash
-# Sendbox API Configuration
-SENDBOX_API_KEY=your_actual_sendbox_api_key_here
-SENDBOX_ENV=staging
-```
-
-**Example:**
-```bash
-SENDBOX_API_KEY=sk_test_1234567890abcdefghijklmnopqrstuvwxyz
-SENDBOX_ENV=staging
-```
-
-### Step 3: Update Warehouse Contact Info
-
-While you're in the `.env` file, also update:
+Run the token authentication test:
 
 ```bash
-# Warehouse Contact
-WAREHOUSE_PHONE=+234_YOUR_ACTUAL_PHONE_NUMBER
-WAREHOUSE_EMAIL=your_actual_email@trollzstore.com
+python test_token_refresh.py
 ```
 
-### Step 4: Restart Your Server
+This will verify:
+- ✅ Token decoding and expiry checking
+- ✅ Automatic token refresh logic
+- ✅ API calls with token authentication
+- ✅ Shipping quotes functionality
 
-After updating `.env`, restart your Flask server:
+## Test Your Integration
+
+### 1. Check Server Logs
+
+Start your server and check for:
+```
+INFO:services.sendbox_service:Sendbox client initialized - Environment: staging
+INFO:services.sendbox_service:Access token expires in X hours
+```
+
+### 2. Test API Endpoints
 
 ```bash
-# Stop the server (Ctrl+C)
-# Then start it again
-python app.py
-```
-
----
-
-## Verify Configuration
-
-Test that the API key is loaded:
-
-```bash
-python -c "from config import Config; print('API Key configured:', bool(Config.SENDBOX_API_KEY))"
-```
-
-Should output:
-```
-API Key configured: True
-```
-
----
-
-## Test Shipping Quotes
-
-Once configured, test getting shipping quotes:
-
-```bash
-curl -X POST http://localhost:4500/api/shipping/quotes \
-  -H "Authorization: Bearer YOUR_USER_TOKEN" \
+# Get shipping quotes
+curl -X POST http://localhost:5000/api/shipping/quotes \
   -H "Content-Type: application/json" \
   -d '{
-    "destination_address_id": 1,
-    "items": [
-      {
-        "product_id": 1,
-        "quantity": 1
-      }
-    ]
+    "destination": {
+      "name": "Test Customer",
+      "phone": "+2348012345678",
+      "address": "123 Test St",
+      "city": "Lagos",
+      "state": "Lagos",
+      "country": "NG"
+    },
+    "weight": 0.5,
+    "items": [{"name": "Test", "quantity": 1, "value": 5000, "weight": 0.5}]
   }'
 ```
 
----
+### 3. Monitor Token Refresh
 
-## If You Don't Have a Sendbox Account Yet
-
-### For Testing Without Sendbox:
-
-You can still use the address management features without a Sendbox API key:
-- Create addresses ✅
-- List addresses ✅
-- Update addresses ✅
-- Delete addresses ✅
-
-But you'll need the API key for:
-- Getting shipping quotes ❌
-- Creating shipments ❌
-- Tracking shipments ❌
-
-### Sign Up for Sendbox:
-
-1. Visit: https://developers.staging.sendbox.co/
-2. Click "Sign Up"
-3. Fill in your details
-4. Verify your email
-5. Create an application
-6. Copy your API key
-7. Add to `.env` file
-
----
-
-## Production vs Staging
-
-### Staging (for testing):
-```bash
-SENDBOX_API_KEY=sk_test_...
-SENDBOX_ENV=staging
+Watch logs for automatic token refresh:
 ```
-- Use for development and testing
-- Free to use
-- Can fund account manually for testing
-
-### Production (for live):
-```bash
-SENDBOX_API_KEY=sk_live_...
-SENDBOX_ENV=live
-```
-- Use for production
-- Real shipments
-- Real charges
-
----
-
-## Common Issues
-
-### Issue: "API key not configured"
-**Solution:** Add `SENDBOX_API_KEY` to `.env` file
-
-### Issue: "Authentication failed"
-**Solution:** Check that your API key is correct and not expired
-
-### Issue: "Changes not taking effect"
-**Solution:** Restart your Flask server after updating `.env`
-
-### Issue: "Still getting errors"
-**Solution:** Check that `.env` file is in the root directory of your project
-
----
-
-## Quick Checklist
-
-- [ ] Created Sendbox account
-- [ ] Got API key from Sendbox portal
-- [ ] Added `SENDBOX_API_KEY` to `.env`
-- [ ] Added `SENDBOX_ENV=staging` to `.env`
-- [ ] Updated warehouse phone/email
-- [ ] Restarted Flask server
-- [ ] Tested configuration
-- [ ] Tested shipping quotes
-
----
-
-## Example .env File
-
-Here's what your `.env` file should look like:
-
-```bash
-# Database Configuration
-DB_HOST=57.131.33.181
-DB_PORT=3306
-DB_USER=admin
-DB_PASSWORD=your_password
-DB_NAME=trollzstorecom_tr0llz_db
-
-# JWT Configuration
-JWT_SECRET=trollz_store_jwt_secret_key_2026
-JWT_EXPIRATION_HOURS=72
-
-# Flask Configuration
-FLASK_DEBUG=True
-FLASK_HOST=0.0.0.0
-FLASK_PORT=4500
-
-# Sendbox API Configuration
-SENDBOX_API_KEY=sk_test_your_actual_key_here
-SENDBOX_ENV=staging
-
-# Warehouse/Origin Address Configuration
-WAREHOUSE_FIRST_NAME=Trollz Store
-WAREHOUSE_LAST_NAME=Warehouse
-WAREHOUSE_STREET=LYPAS Plaza, Cluster Industrial Complex
-WAREHOUSE_STREET_LINE_2=
-WAREHOUSE_CITY=Owerri
-WAREHOUSE_STATE=Imo
-WAREHOUSE_COUNTRY=NG
-WAREHOUSE_POST_CODE=460001
-WAREHOUSE_PHONE=+234_YOUR_PHONE_NUMBER
-WAREHOUSE_EMAIL=your_email@trollzstore.com
+INFO:services.sendbox_service:Access token expired or expiring soon, refreshing...
+INFO:services.sendbox_service:Refreshing Sendbox access token...
+INFO:services.sendbox_service:✅ Access token refreshed successfully
 ```
 
----
+## Token Information
 
-## Need Help?
+### Access Token
+- **Expiry**: ~24 hours from issue date
+- **Auto-Refresh**: Yes, when < 5 minutes remaining
+- **Location**: `services/sendbox_service.py` (class variable)
 
-1. Check that `.env` file exists in project root
-2. Verify API key is correct (no extra spaces)
-3. Make sure you restarted the server
-4. Check server logs for any other errors
+### Refresh Token
+- **Expiry**: ~30 days from issue date
+- **Usage**: Automatically used to get new access tokens
+- **Location**: `services/sendbox_service.py` (class variable)
 
----
+### Client Secret
+- **Expiry**: Never (unless manually revoked)
+- **Usage**: Required for token refresh
+- **Location**: `services/sendbox_service.py` (class variable)
 
-**Next Step:** Add your Sendbox API key to `.env` and restart the server!
+## Troubleshooting
+
+### Token Refresh Failed
+**Symptom**: Logs show "Failed to refresh token"
+
+**Solutions**:
+1. Check internet connection
+2. Verify Sendbox API is accessible
+3. Confirm refresh token hasn't expired (check expiry date)
+4. If refresh token expired, update tokens manually
+
+### API Calls Failing with 401 Error
+**Symptom**: API returns "Authentication failed"
+
+**Solutions**:
+1. Check if access token is expired
+2. Verify token refresh is working (check logs)
+3. Manually update tokens if needed
+4. Ensure client secret is correct
+
+### How to Update Tokens Manually
+
+If you need to update tokens:
+
+1. Get new tokens from Sendbox dashboard
+2. Open `services/sendbox_service.py`
+3. Update the class variables:
+```python
+ACCESS_TOKEN = "new_access_token_here"
+REFRESH_TOKEN = "new_refresh_token_here"
+CLIENT_SECRET = "new_client_secret_here"
+```
+4. Restart the server
+5. Run test: `python test_token_refresh.py`
+
+## Legacy API Key Method (Deprecated)
+
+The old API key method is no longer used. If you have `SENDBOX_API_KEY` in your `.env` file, it will be ignored.
+
+### Migration Complete
+- ❌ Old: API Key authentication
+- ✅ New: OAuth 2.0 token authentication with auto-refresh
+
+## Documentation
+
+For detailed information about token authentication:
+- **Token Auth Guide**: `SENDBOX_TOKEN_AUTH.md`
+- **Integration Guide**: `MOBILE_APP_INTEGRATION_GUIDE.md`
+- **Setup Summary**: `FINAL_SETUP_SUMMARY.md`
+
+## Next Steps
+
+Your authentication is fully configured. You can now:
+
+1. ✅ Test shipping quotes: `POST /api/shipping/quotes`
+2. ✅ Create shipments: `POST /api/orders/{id}/confirm`
+3. ✅ Track shipments: `GET /api/shipping/track/{code}`
+4. ✅ Configure webhooks: `POST /api/webhooks/sendbox`
+5. ✅ Monitor token refresh in logs
+
+## Environment Variables
+
+Your `.env` file should include:
+
+```env
+# Database
+DB_HOST=localhost
+DB_USER=your_db_user
+DB_PASSWORD=your_db_password
+DB_NAME=your_db_name
+
+# Sendbox Configuration
+SENDBOX_ENVIRONMENT=staging  # or 'live' for production
+
+# Warehouse Address
+SENDBOX_WAREHOUSE_NAME=Trollz Store
+SENDBOX_WAREHOUSE_PHONE=+2348012345678
+SENDBOX_WAREHOUSE_EMAIL=store@trollz.com
+SENDBOX_WAREHOUSE_ADDRESS=LYPAS Plaza, Cluster Industrial Complex
+SENDBOX_WAREHOUSE_CITY=Owerri
+SENDBOX_WAREHOUSE_STATE=Imo
+SENDBOX_WAREHOUSE_COUNTRY=NG
+
+# Flask
+FLASK_ENV=development
+SECRET_KEY=your_secret_key_here
+```
+
+**Note**: `SENDBOX_API_KEY` is no longer needed with token authentication.

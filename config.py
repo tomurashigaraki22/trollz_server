@@ -25,7 +25,7 @@ class Config:
     SENDBOX_STAGING_URL = "https://sandbox.staging.sendbox.co"
     SENDBOX_LIVE_URL = "https://live.sendbox.co"
     SENDBOX_API_KEY = os.getenv("SENDBOX_API_KEY", "")
-    SENDBOX_ENVIRONMENT = os.getenv("SENDBOX_ENV", "staging")  # staging or live
+    SENDBOX_ENVIRONMENT = os.getenv("SENDBOX_ENV", "live")  # staging or live
 
     @staticmethod
     def get_sendbox_base_url():
