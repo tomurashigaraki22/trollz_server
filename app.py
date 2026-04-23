@@ -12,6 +12,7 @@ from routes.addresses import addresses_bp
 from routes.shipping import shipping_bp
 from routes.webhooks import webhooks_bp
 from routes.admin_shipping import admin_shipping_bp
+from routes.payment import payment_bp
 
 
 def create_app():
@@ -30,6 +31,7 @@ def create_app():
     app.register_blueprint(shipping_bp)
     app.register_blueprint(webhooks_bp)
     app.register_blueprint(admin_shipping_bp)
+    app.register_blueprint(payment_bp)
 
     # Health check route
     @app.route("/", methods=["GET"])

@@ -21,6 +21,11 @@ class Config:
     HOST = os.getenv("FLASK_HOST", "0.0.0.0")
     PORT = int(os.getenv("FLASK_PORT", 4500))
 
+    # Flutterwave Configuration
+    FLUTTERWAVE_PUBLIC_KEY = os.getenv("FLUTTERWAVE_PUBLIC_KEY", "FLWPUBK-9dfb0a099633cdea36091144c4ab90a1-X")
+    FLUTTERWAVE_SECRET_KEY = os.getenv("FLUTTERWAVE_SECRET_KEY", "")
+    FLUTTERWAVE_ENCRYPTION_KEY = os.getenv("FLUTTERWAVE_ENCRYPTION_KEY", "")
+
     # Sendbox API Configuration
     SENDBOX_STAGING_URL = "https://sandbox.staging.sendbox.co"
     SENDBOX_LIVE_URL = "https://live.sendbox.co"
