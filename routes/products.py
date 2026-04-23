@@ -19,7 +19,7 @@ def _serialize_product(row):
         if product.get(key):
             product[key] = product[key].strftime("%Y-%m-%d %H:%M:%S")
     # Convert Decimal fields to float
-    for key in ("flash_sale_price", "old_price"):
+    for key in ("flash_sale_price", "old_price", "weight"):
         if product.get(key) is not None:
             product[key] = float(product[key])
     # Convert tinyint booleans
@@ -396,6 +396,15 @@ def create_product(current_admin):
             if field not in data or data[field] is None:
                 return jsonify({"status": "error", "message": f"'{field}' is required"}), 400
 
+        # Validate weight if provided
+        weight = data.get("weight", 0.5)
+        try:
+            weight = float(weight)
+            if weight <= 0:
+                return jsonify({"status": "error", "message": "Weight must be greater than 0"}), 400
+        except (ValueError, TypeError):
+            return jsonify({"status": "error", "message": "Invalid weight value"}), 400
+
         conn = get_db_connection()
         try:
             with conn.cursor() as cursor:
@@ -404,8 +413,8 @@ def create_product(current_admin):
                     INSERT INTO product
                         (item, category, price, discount, description, supplier,
                          `new`, img, qty, shipped_from_abroad,
-                         is_flash_sale, flash_sale_price, flash_sale_start, flash_sale_end, old_price)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                         is_flash_sale, flash_sale_price, flash_sale_start, flash_sale_end, old_price, weight)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """,
                     (
                         data["item"],
@@ -423,6 +432,7 @@ def create_product(current_admin):
                         data.get("flash_sale_start"),
                         data.get("flash_sale_end"),
                         data.get("old_price"),
+                        weight,
                     ),
                 )
                 new_id = cursor.lastrowid
@@ -451,6 +461,15 @@ def update_product(current_admin, product_id):
         if not data:
             return jsonify({"status": "error", "message": "No data provided"}), 400
 
+        # Validate weight if provided
+        if "weight" in data:
+            try:
+                weight = float(data["weight"])
+                if weight <= 0:
+                    return jsonify({"status": "error", "message": "Weight must be greater than 0"}), 400
+            except (ValueError, TypeError):
+                return jsonify({"status": "error", "message": "Invalid weight value"}), 400
+
         conn = get_db_connection()
         try:
             with conn.cursor() as cursor:
@@ -476,6 +495,7 @@ def update_product(current_admin, product_id):
                     "flash_sale_start": str,
                     "flash_sale_end": str,
                     "old_price": lambda v: float(v) if v is not None else None,
+                    "weight": lambda v: float(v) if v is not None else None,
                 }
 
                 set_parts = []

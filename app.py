@@ -8,6 +8,10 @@ from routes.auth import auth_bp
 from routes.products import products_bp
 from routes.categories import categories_bp
 from routes.orders import orders_bp
+from routes.addresses import addresses_bp
+from routes.shipping import shipping_bp
+from routes.webhooks import webhooks_bp
+from routes.admin_shipping import admin_shipping_bp
 
 
 def create_app():
@@ -22,6 +26,10 @@ def create_app():
     app.register_blueprint(products_bp)
     app.register_blueprint(categories_bp)
     app.register_blueprint(orders_bp)
+    app.register_blueprint(addresses_bp)
+    app.register_blueprint(shipping_bp)
+    app.register_blueprint(webhooks_bp)
+    app.register_blueprint(admin_shipping_bp)
 
     # Health check route
     @app.route("/", methods=["GET"])

@@ -366,17 +366,39 @@ The API uses the following configuration:
 
 Environment variables can override these defaults via `.env` file:
 ```env
+# Database Configuration
 DB_HOST=57.131.33.181
 DB_PORT=3306
 DB_USER=admin
 DB_PASSWORD=your_password
 DB_NAME=trollzstorecom_tr0llz_db
+
+# JWT Configuration
 JWT_SECRET=your_secret_key
 JWT_EXPIRATION_HOURS=72
+
+# Flask Configuration
 FLASK_DEBUG=True
 FLASK_HOST=0.0.0.0
 FLASK_PORT=4500
+
+# Sendbox API Configuration (for shipping integration)
+SENDBOX_API_KEY=your_sendbox_api_key
+SENDBOX_ENV=staging  # or 'live' for production
+
+# Warehouse Address Configuration
+WAREHOUSE_FIRST_NAME=Trollz Store
+WAREHOUSE_LAST_NAME=Warehouse
+WAREHOUSE_STREET=10 Warehouse Street
+WAREHOUSE_CITY=Ikeja
+WAREHOUSE_STATE=Lagos
+WAREHOUSE_COUNTRY=NG
+WAREHOUSE_POST_CODE=100001
+WAREHOUSE_PHONE=+234 800 000 0000
+WAREHOUSE_EMAIL=warehouse@trollzstore.com
 ```
+
+See `.env.example` for a complete template.
 
 ---
 
@@ -412,6 +434,53 @@ The database includes the following main tables:
 - User authentication and profiles
 - Password reset functionality
 - Address management
+
+---
+
+## Sendbox Shipping Integration
+
+The Trollz Store API includes integration with Sendbox for automated shipping and logistics.
+
+### Features
+- Real-time shipping quotes
+- Automatic shipment creation
+- Live tracking updates
+- International shipping with landed cost calculation
+- Webhook support for status updates
+
+### Setup
+
+1. **Register for Sendbox API:**
+   - Staging: https://developers.staging.sendbox.co/
+   - Production: https://developers.sendbox.co/
+
+2. **Configure environment variables:**
+   ```bash
+   cp .env.example .env
+   # Edit .env and add your SENDBOX_API_KEY
+   ```
+
+3. **Run database migrations:**
+   ```bash
+   python run_migrations.py run
+   ```
+
+4. **Verify setup:**
+   ```bash
+   python test_sendbox_setup.py
+   ```
+
+### Documentation
+- **Integration Guide:** `SENDBOX_INTEGRATION_PHASES.md`
+- **Phase 1 Setup:** `PHASE1_SETUP_GUIDE.md`
+- **API Reference:** `SENDBOX_D.md`
+- **Migrations:** `migrations/README.md`
+
+### Current Status
+- ✓ Phase 1: Foundation Setup (Complete)
+- ⧗ Phase 2: Shipping Quotes (Pending)
+- ⧗ Phase 3: Shipment Creation (Pending)
+- ⧗ Phase 4: Tracking Integration (Pending)
 
 ---
 

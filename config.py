@@ -20,3 +20,47 @@ class Config:
     DEBUG = os.getenv("FLASK_DEBUG", "True").lower() == "true"
     HOST = os.getenv("FLASK_HOST", "0.0.0.0")
     PORT = int(os.getenv("FLASK_PORT", 4500))
+
+    # Sendbox API Configuration
+    SENDBOX_STAGING_URL = "https://sandbox.staging.sendbox.co"
+    SENDBOX_LIVE_URL = "https://live.sendbox.co"
+    SENDBOX_API_KEY = os.getenv("SENDBOX_API_KEY", "")
+    SENDBOX_ENVIRONMENT = os.getenv("SENDBOX_ENV", "staging")  # staging or live
+
+    @staticmethod
+    def get_sendbox_base_url():
+        """Get the appropriate Sendbox base URL based on environment."""
+        if Config.SENDBOX_ENVIRONMENT == "live":
+            return Config.SENDBOX_LIVE_URL
+        return Config.SENDBOX_STAGING_URL
+
+    # Warehouse/Origin Address Configuration
+    WAREHOUSE_FIRST_NAME = os.getenv("WAREHOUSE_FIRST_NAME", "Trollz Store")
+    WAREHOUSE_LAST_NAME = os.getenv("WAREHOUSE_LAST_NAME", "Warehouse")
+    WAREHOUSE_STREET = os.getenv("WAREHOUSE_STREET", "10 Warehouse Street")
+    WAREHOUSE_STREET_LINE_2 = os.getenv("WAREHOUSE_STREET_LINE_2", "")
+    WAREHOUSE_CITY = os.getenv("WAREHOUSE_CITY", "Ikeja")
+    WAREHOUSE_STATE = os.getenv("WAREHOUSE_STATE", "Lagos")
+    WAREHOUSE_COUNTRY = os.getenv("WAREHOUSE_COUNTRY", "NG")
+    WAREHOUSE_POST_CODE = os.getenv("WAREHOUSE_POST_CODE", "100001")
+    WAREHOUSE_PHONE = os.getenv("WAREHOUSE_PHONE", "+234 800 000 0000")
+    WAREHOUSE_EMAIL = os.getenv("WAREHOUSE_EMAIL", "warehouse@trollzstore.com")
+
+    @staticmethod
+    def get_warehouse_address():
+        """Get warehouse address as a dictionary for Sendbox API."""
+        return {
+            "first_name": Config.WAREHOUSE_FIRST_NAME,
+            "last_name": Config.WAREHOUSE_LAST_NAME,
+            "street": Config.WAREHOUSE_STREET,
+            "street_line_2": Config.WAREHOUSE_STREET_LINE_2,
+            "city": Config.WAREHOUSE_CITY,
+            "state": Config.WAREHOUSE_STATE,
+            "country": Config.WAREHOUSE_COUNTRY,
+            "post_code": Config.WAREHOUSE_POST_CODE,
+            "phone": Config.WAREHOUSE_PHONE,
+            "email": Config.WAREHOUSE_EMAIL,
+            "name": None,
+            "lng": None,
+            "lat": None
+        }
