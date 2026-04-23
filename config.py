@@ -37,12 +37,12 @@ class Config:
     # Warehouse/Origin Address Configuration
     WAREHOUSE_FIRST_NAME = os.getenv("WAREHOUSE_FIRST_NAME", "Trollz Store")
     WAREHOUSE_LAST_NAME = os.getenv("WAREHOUSE_LAST_NAME", "Warehouse")
-    WAREHOUSE_STREET = os.getenv("WAREHOUSE_STREET", "10 Warehouse Street")
+    WAREHOUSE_STREET = os.getenv("WAREHOUSE_STREET", "LYPAS Plaza, Cluster Industrial Complex")
     WAREHOUSE_STREET_LINE_2 = os.getenv("WAREHOUSE_STREET_LINE_2", "")
-    WAREHOUSE_CITY = os.getenv("WAREHOUSE_CITY", "Ikeja")
-    WAREHOUSE_STATE = os.getenv("WAREHOUSE_STATE", "Lagos")
+    WAREHOUSE_CITY = os.getenv("WAREHOUSE_CITY", "Owerri")
+    WAREHOUSE_STATE = os.getenv("WAREHOUSE_STATE", "Imo")
     WAREHOUSE_COUNTRY = os.getenv("WAREHOUSE_COUNTRY", "NG")
-    WAREHOUSE_POST_CODE = os.getenv("WAREHOUSE_POST_CODE", "100001")
+    WAREHOUSE_POST_CODE = os.getenv("WAREHOUSE_POST_CODE", "460001")
     WAREHOUSE_PHONE = os.getenv("WAREHOUSE_PHONE", "+234 800 000 0000")
     WAREHOUSE_EMAIL = os.getenv("WAREHOUSE_EMAIL", "warehouse@trollzstore.com")
 

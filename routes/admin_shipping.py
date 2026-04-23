@@ -630,3 +630,411 @@ def get_all_sendbox_shipments(current_admin):
     except Exception as e:
         logger.error(f"Error fetching Sendbox shipments: {str(e)}")
         return jsonify({"status": "error", "message": f"Server error: {str(e)}"}), 500
+
+
+
+# ──────────────────────────────────────────────
+# WEBHOOK MANAGEMENT
+# ──────────────────────────────────────────────
+
+@admin_shipping_bp.route("/api/admin/webhooks/events", methods=["GET"])
+@admin_required
+def get_webhook_events(current_admin):
+    """
+    Get webhook events for admin dashboard (admin only).
+    
+    Query parameters:
+    - page: Page number (default: 1)
+    - limit: Items per page (default: 20, max: 100)
+    - processed: Filter by processed status (true/false)
+    - order_id: Filter by order ID
+    - tracking_code: Filter by tracking code
+    """
+    try:
+        page = max(int(request.args.get("page", 1)), 1)
+        limit = min(max(int(request.args.get("limit", 20)), 1), 100)
+        offset = (page - 1) * limit
+        
+        # Build filters
+        filters = []
+        params = []
+        
+        processed = request.args.get("processed")
+        if processed is not None:
+            filters.append("processed = %s")
+            params.append(processed.lower() == "true")
+        
+        order_id = request.args.get("order_id")
+        if order_id:
+            filters.append("order_id = %s")
+            params.append(int(order_id))
+        
+        tracking_code = request.args.get("tracking_code")
+        if tracking_code:
+            filters.append("sendbox_tracking_code = %s")
+            params.append(tracking_code)
+        
+        where_clause = ""
+        if filters:
+            where_clause = "WHERE " + " AND ".join(filters)
+        
+        conn = get_db_connection()
+        try:
+            with conn.cursor() as cursor:
+                # Get total count
+                cursor.execute(
+                    f"SELECT COUNT(*) as total FROM webhook_events {where_clause}",
+                    params
+                )
+                total = cursor.fetchone()["total"]
+                
+                # Fetch webhook events
+                cursor.execute(
+                    f"""
+                    SELECT 
+                        id, event_type, order_id, sendbox_tracking_code,
+                        processed, processed_at, error_message, created_at,
+                        payload
+                    FROM webhook_events
+                    {where_clause}
+                    ORDER BY created_at DESC
+                    LIMIT %s OFFSET %s
+                    """,
+                    params + [limit, offset]
+                )
+                events = cursor.fetchall()
+                
+                # Format events
+                formatted_events = []
+                for event in events:
+                    event_dict = dict(event)
+                    
+                    # Parse JSON payload
+                    if event_dict.get("payload"):
+                        try:
+                            event_dict["payload"] = json.loads(event_dict["payload"])
+                        except:
+                            pass
+                    
+                    # Format timestamps
+                    if event_dict.get("created_at"):
+                        event_dict["created_at"] = event_dict["created_at"].strftime("%Y-%m-%d %H:%M:%S")
+                    if event_dict.get("processed_at"):
+                        event_dict["processed_at"] = event_dict["processed_at"].strftime("%Y-%m-%d %H:%M:%S")
+                    
+                    formatted_events.append(event_dict)
+                
+                total_pages = (total + limit - 1) // limit
+                
+                return jsonify({
+                    "status": "success",
+                    "data": {
+                        "events": formatted_events,
+                        "pagination": {
+                            "page": page,
+                            "limit": limit,
+                            "total": total,
+                            "total_pages": total_pages
+                        }
+                    }
+                }), 200
+                
+        finally:
+            conn.close()
+            
+    except Exception as e:
+        logger.error(f"Error fetching webhook events: {str(e)}")
+        return jsonify({"status": "error", "message": f"Server error: {str(e)}"}), 500
+
+
+@admin_shipping_bp.route("/api/admin/webhooks/stats", methods=["GET"])
+@admin_required
+def get_webhook_stats(current_admin):
+    """
+    Get webhook statistics for admin dashboard (admin only).
+    
+    Returns:
+    - Total webhooks received
+    - Processed vs failed
+    - Recent webhook activity
+    - Event type breakdown
+    """
+    try:
+        conn = get_db_connection()
+        try:
+            with conn.cursor() as cursor:
+                # Total webhooks
+                cursor.execute("SELECT COUNT(*) as total FROM webhook_events")
+                total = cursor.fetchone()["total"]
+                
+                # Processed vs failed
+                cursor.execute("""
+                    SELECT 
+                        COUNT(CASE WHEN processed = TRUE THEN 1 END) as processed,
+                        COUNT(CASE WHEN processed = FALSE THEN 1 END) as failed
+                    FROM webhook_events
+                """)
+                status_counts = cursor.fetchone()
+                
+                # Event type breakdown
+                cursor.execute("""
+                    SELECT event_type, COUNT(*) as count
+                    FROM webhook_events
+                    GROUP BY event_type
+                    ORDER BY count DESC
+                """)
+                event_types = cursor.fetchall()
+                
+                # Recent activity (last 24 hours)
+                cursor.execute("""
+                    SELECT COUNT(*) as count
+                    FROM webhook_events
+                    WHERE created_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
+                """)
+                recent_24h = cursor.fetchone()["count"]
+                
+                # Recent activity (last 7 days)
+                cursor.execute("""
+                    SELECT COUNT(*) as count
+                    FROM webhook_events
+                    WHERE created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
+                """)
+                recent_7d = cursor.fetchone()["count"]
+                
+                # Failed webhooks (last 24 hours)
+                cursor.execute("""
+                    SELECT COUNT(*) as count
+                    FROM webhook_events
+                    WHERE processed = FALSE
+                    AND created_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
+                """)
+                failed_24h = cursor.fetchone()["count"]
+                
+                # Latest webhooks
+                cursor.execute("""
+                    SELECT 
+                        id, event_type, order_id, sendbox_tracking_code,
+                        processed, created_at
+                    FROM webhook_events
+                    ORDER BY created_at DESC
+                    LIMIT 10
+                """)
+                latest = cursor.fetchall()
+                
+                # Format latest webhooks
+                formatted_latest = []
+                for webhook in latest:
+                    webhook_dict = dict(webhook)
+                    if webhook_dict.get("created_at"):
+                        webhook_dict["created_at"] = webhook_dict["created_at"].strftime("%Y-%m-%d %H:%M:%S")
+                    formatted_latest.append(webhook_dict)
+                
+                return jsonify({
+                    "status": "success",
+                    "data": {
+                        "summary": {
+                            "total_webhooks": total,
+                            "processed": status_counts["processed"],
+                            "failed": status_counts["failed"],
+                            "success_rate": (status_counts["processed"] / total * 100) if total > 0 else 0
+                        },
+                        "recent_activity": {
+                            "last_24_hours": recent_24h,
+                            "last_7_days": recent_7d,
+                            "failed_24_hours": failed_24h
+                        },
+                        "event_types": [
+                            {
+                                "event_type": et["event_type"],
+                                "count": et["count"]
+                            }
+                            for et in event_types
+                        ],
+                        "latest_webhooks": formatted_latest
+                    }
+                }), 200
+                
+        finally:
+            conn.close()
+            
+    except Exception as e:
+        logger.error(f"Error fetching webhook stats: {str(e)}")
+        return jsonify({"status": "error", "message": f"Server error: {str(e)}"}), 500
+
+
+@admin_shipping_bp.route("/api/admin/webhooks/events/<int:event_id>", methods=["GET"])
+@admin_required
+def get_webhook_event_details(current_admin, event_id):
+    """
+    Get detailed information about a specific webhook event (admin only).
+    
+    Args:
+        event_id: Webhook event ID
+    """
+    try:
+        conn = get_db_connection()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute("""
+                    SELECT 
+                        we.*,
+                        o.tracking as order_tracking,
+                        o.order_status,
+                        o.delivery_status
+                    FROM webhook_events we
+                    LEFT JOIN orders o ON we.order_id = o.id
+                    WHERE we.id = %s
+                """, (event_id,))
+                
+                event = cursor.fetchone()
+                
+                if not event:
+                    return jsonify({
+                        "status": "error",
+                        "message": "Webhook event not found"
+                    }), 404
+                
+                event_dict = dict(event)
+                
+                # Parse JSON payload
+                if event_dict.get("payload"):
+                    try:
+                        event_dict["payload"] = json.loads(event_dict["payload"])
+                    except:
+                        pass
+                
+                # Format timestamps
+                if event_dict.get("created_at"):
+                    event_dict["created_at"] = event_dict["created_at"].strftime("%Y-%m-%d %H:%M:%S")
+                if event_dict.get("processed_at"):
+                    event_dict["processed_at"] = event_dict["processed_at"].strftime("%Y-%m-%d %H:%M:%S")
+                
+                return jsonify({
+                    "status": "success",
+                    "data": {
+                        "event": event_dict
+                    }
+                }), 200
+                
+        finally:
+            conn.close()
+            
+    except Exception as e:
+        logger.error(f"Error fetching webhook event details: {str(e)}")
+        return jsonify({"status": "error", "message": f"Server error: {str(e)}"}), 500
+
+
+@admin_shipping_bp.route("/api/admin/webhooks/retry/<int:event_id>", methods=["POST"])
+@admin_required
+def retry_webhook_event(current_admin, event_id):
+    """
+    Retry processing a failed webhook event (admin only).
+    
+    Args:
+        event_id: Webhook event ID
+    """
+    try:
+        conn = get_db_connection()
+        try:
+            with conn.cursor() as cursor:
+                # Get webhook event
+                cursor.execute("""
+                    SELECT * FROM webhook_events WHERE id = %s
+                """, (event_id,))
+                
+                event = cursor.fetchone()
+                
+                if not event:
+                    return jsonify({
+                        "status": "error",
+                        "message": "Webhook event not found"
+                    }), 404
+                
+                # Parse payload
+                try:
+                    payload = json.loads(event["payload"])
+                except:
+                    return jsonify({
+                        "status": "error",
+                        "message": "Invalid webhook payload"
+                    }), 400
+                
+                # Extract tracking code
+                tracking_code = payload.get("tracking_code") or payload.get("tracking")
+                sendbox_status = payload.get("status")
+                
+                if not tracking_code:
+                    return jsonify({
+                        "status": "error",
+                        "message": "Missing tracking code in payload"
+                    }), 400
+                
+                # Find order
+                cursor.execute("""
+                    SELECT id, order_status, delivery_status 
+                    FROM orders 
+                    WHERE sendbox_tracking_code = %s
+                """, (tracking_code,))
+                
+                order = cursor.fetchone()
+                
+                if not order:
+                    return jsonify({
+                        "status": "error",
+                        "message": "Order not found for tracking code"
+                    }), 404
+                
+                # Map status
+                if sendbox_status:
+                    order_status, delivery_status = map_sendbox_status_to_internal(sendbox_status)
+                else:
+                    order_status = order["order_status"]
+                    delivery_status = order["delivery_status"]
+                
+                # Update order
+                cursor.execute("""
+                    UPDATE orders
+                    SET sendbox_status = %s,
+                        order_status = %s,
+                        delivery_status = %s,
+                        sendbox_webhook_data = %s
+                    WHERE id = %s
+                """, (
+                    sendbox_status,
+                    order_status,
+                    delivery_status,
+                    event["payload"],
+                    order["id"]
+                ))
+                
+                # Update webhook event
+                cursor.execute("""
+                    UPDATE webhook_events
+                    SET processed = TRUE,
+                        processed_at = %s,
+                        error_message = NULL,
+                        order_id = %s
+                    WHERE id = %s
+                """, (datetime.now(), order["id"], event_id))
+                
+                conn.commit()
+                
+                logger.info(f"Webhook event {event_id} retried successfully for order {order['id']}")
+                
+                return jsonify({
+                    "status": "success",
+                    "message": "Webhook event processed successfully",
+                    "data": {
+                        "event_id": event_id,
+                        "order_id": order["id"],
+                        "order_status": order_status,
+                        "delivery_status": delivery_status
+                    }
+                }), 200
+                
+        finally:
+            conn.close()
+            
+    except Exception as e:
+        logger.error(f"Error retrying webhook event: {str(e)}")
+        return jsonify({"status": "error", "message": f"Server error: {str(e)}"}), 500

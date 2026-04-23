@@ -1,6 +1,6 @@
 """
 Sendbox API Service
-Handles all interactions with the Sendbox shipping API.
+Handles all interactions with the Sendbox shipping API with automatic token refresh.
 """
 
 import requests
@@ -8,6 +8,8 @@ import logging
 from typing import Dict, List, Optional, Any
 from datetime import datetime, timedelta
 from config import Config
+import jwt
+import time
 
 
 # Configure logging
@@ -33,7 +35,13 @@ class SendboxClient:
     - Creating shipments
     - Tracking shipments
     - Calculating landed costs
+    - Automatic token refresh
     """
+    
+    # Sendbox credentials
+    ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ1aWQiOiI2OWQ2MWE5OGEyOGIyYTAwMjI3NzY4YWIiLCJhaWQiOiI2OWU5ZmJlNGEyOGIyYTAwMjVhOGRmMTUiLCJ0d29fZmEiOmZhbHNlLCJpbnN0YW5jZV9pZCI6IjYxMzZkZmE2YTFhYjlkMzE4YmNmY2I5NCIsImVudGl0eV9pZCI6bnVsbCwiaXNzIjoic2VuZGJveC5hcHBzLmF1dGgtNjEzNmRmYTZhMWFiOWQzMThiY2ZjYjk0IiwiZXhwIjoxNzgyMDM5NjUyfQ.YYFC2n1ypUfInDXjHFkXALpDVMO7Oo3kIKYajVKCi58"
+    REFRESH_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJhcHBsaWNhdGlvbiI6eyJwayI6IjY5ZTlmYmU0YTI4YjJhMDAyNWE4ZGYxNSIsImRlc2NyaXB0aW9uIjoiQW4gZWNvbW1lcmNlIHN0b3JlIGJhc2VkIGluIE5pZ2VyaWEiLCJuYW1lIjoiVHJvbGx6IFN0b3JlIn0sImFwcF9pZCI6IjY5ZTlmYmU0YTI4YjJhMDAyNWE4ZGYxNSIsImlzcyI6InNlbmRib3guYXBwcy5hdXRoIiwiZXhwIjoxODExNTAyMDUyfQ.BZZco3ieQemGKpCVJmuh4LIvpt3RMkz6GH123-Q8c6c"
+    CLIENT_SECRET = "602c256bf4da43b4d312d54ab938aed9141dee460c4770d75b90261da26e7721a621e5e8123702bdb142d32baa4caf813ccde029c115621c26db843b20297b38"
     
     def __init__(self, api_key: str = None, environment: str = None):
         """
@@ -47,15 +55,85 @@ class SendboxClient:
         self.environment = environment or Config.SENDBOX_ENVIRONMENT
         self.base_url = Config.get_sendbox_base_url()
         
-        if not self.api_key:
-            logger.warning("Sendbox API key not configured!")
+        # Token management
+        self.current_access_token = self.ACCESS_TOKEN
+        self.current_refresh_token = self.REFRESH_TOKEN
+        self.token_expiry = None
+        
+        # Check if token needs refresh on initialization
+        self._check_and_refresh_token()
         
         logger.info(f"Sendbox client initialized - Environment: {self.environment}")
     
+    def _is_token_expired(self) -> bool:
+        """Check if the current access token is expired or about to expire."""
+        try:
+            # Decode token without verification to check expiry
+            decoded = jwt.decode(self.current_access_token, options={"verify_signature": False})
+            exp_timestamp = decoded.get('exp', 0)
+            
+            # Check if token expires in less than 5 minutes
+            current_time = time.time()
+            buffer_time = 300  # 5 minutes buffer
+            
+            return (exp_timestamp - current_time) < buffer_time
+        except Exception as e:
+            logger.warning(f"Error checking token expiry: {str(e)}")
+            return True  # Assume expired if we can't decode
+    
+    def _refresh_access_token(self) -> bool:
+        """
+        Refresh the access token using the refresh token.
+        
+        Returns:
+            bool: True if refresh successful, False otherwise
+        """
+        try:
+            logger.info("Refreshing Sendbox access token...")
+            
+            refresh_url = f"{self.base_url}/auth/refresh"
+            
+            response = requests.post(
+                refresh_url,
+                json={
+                    "refresh_token": self.current_refresh_token,
+                    "client_secret": self.CLIENT_SECRET
+                },
+                headers={"Content-Type": "application/json"},
+                timeout=30
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                self.current_access_token = data.get('access_token', self.current_access_token)
+                
+                # Update refresh token if provided
+                if 'refresh_token' in data:
+                    self.current_refresh_token = data['refresh_token']
+                
+                logger.info("✅ Access token refreshed successfully")
+                return True
+            else:
+                logger.error(f"Failed to refresh token: {response.status_code} - {response.text}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Error refreshing token: {str(e)}")
+            return False
+    
+    def _check_and_refresh_token(self):
+        """Check if token is expired and refresh if needed."""
+        if self._is_token_expired():
+            logger.info("Access token expired or expiring soon, refreshing...")
+            self._refresh_access_token()
+    
     def _get_headers(self) -> Dict[str, str]:
         """Get request headers with authentication."""
+        # Check and refresh token before each request
+        self._check_and_refresh_token()
+        
         return {
-            "Authorization": self.api_key,
+            "Authorization": f"Bearer {self.current_access_token}",
             "Content-Type": "application/json"
         }
     
