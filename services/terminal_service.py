@@ -618,8 +618,13 @@ class TerminalClient:
         """
         Create a new shipment using a selected rate.
         
+        According to Terminal Africa API docs, the endpoint expects:
+        - address_from: pickup address ID
+        - address_to: delivery address ID  
+        - parcel: parcel ID (for single parcel)
+        
         Args:
-            rate_id: Terminal rate ID (from get_rates)
+            rate_id: Terminal rate ID (from get_rates) - NOT USED, rates are for quotes only
             origin_address_id: Terminal origin address ID
             destination_address_id: Terminal destination address ID
             parcel_id: Terminal parcel ID
@@ -629,16 +634,16 @@ class TerminalClient:
             Dictionary with shipment details including tracking info
         """
         payload = {
-            "rate_id": rate_id,
-            "origin_address": origin_address_id,
-            "destination_address": destination_address_id,
+            "address_from": origin_address_id,
+            "address_to": destination_address_id,
             "parcel": parcel_id
         }
         
         if metadata:
             payload["metadata"] = metadata
         
-        logger.info(f"Creating shipment with rate: {rate_id}")
+        logger.info(f"Creating shipment")
+        logger.info(f"Payload: {payload}")
         
         response = self._make_request(
             method="POST",
@@ -646,7 +651,11 @@ class TerminalClient:
             data=payload
         )
         
-        logger.info(f"Shipment created successfully - ID: {response.get('shipment_id', 'N/A')}")
+        # Extract shipment ID from response
+        shipment_data = response.get('data', response)
+        shipment_id = shipment_data.get('shipment_id') or shipment_data.get('id')
+        
+        logger.info(f"Shipment created successfully - ID: {shipment_id}")
         
         return response
     

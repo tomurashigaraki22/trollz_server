@@ -1038,3 +1038,508 @@ def retry_webhook_event(current_admin, event_id):
     except Exception as e:
         logger.error(f"Error retrying webhook event: {str(e)}")
         return jsonify({"status": "error", "message": f"Server error: {str(e)}"}), 500
+
+
+
+# ──────────────────────────────────────────────
+# TERMINAL AFRICA ADMIN FEATURES (PHASE 7)
+# ──────────────────────────────────────────────
+
+@admin_shipping_bp.route("/api/admin/terminal/carriers", methods=["GET"])
+@admin_required
+def get_terminal_carriers_admin(current_admin):
+    """
+    Get all Terminal Africa carriers with management options (admin only).
+    
+    Query Parameters:
+        - active: Filter by active status (true/false)
+        - domestic: Filter domestic carriers (true/false)
+        - regional: Filter regional carriers (true/false)
+        - international: Filter international carriers (true/false)
+    """
+    try:
+        from services.terminal_service import get_terminal_client, TerminalAPIError
+        
+        # Get filter parameters
+        active = request.args.get("active")
+        domestic = request.args.get("domestic")
+        regional = request.args.get("regional")
+        international = request.args.get("international")
+        
+        # Convert string to boolean
+        def str_to_bool(val):
+            if val is None:
+                return None
+            return val.lower() in ['true', '1', 'yes']
+        
+        active = str_to_bool(active)
+        domestic = str_to_bool(domestic)
+        regional = str_to_bool(regional)
+        international = str_to_bool(international)
+        
+        client = get_terminal_client()
+        
+        try:
+            response = client.get_carriers(
+                active=active,
+                domestic=domestic,
+                regional=regional,
+                international=international
+            )
+            
+            # Handle nested response
+            if 'data' in response:
+                carriers_data = response['data']
+                if isinstance(carriers_data, dict) and 'carriers' in carriers_data:
+                    carriers = carriers_data['carriers']
+                else:
+                    carriers = carriers_data if isinstance(carriers_data, list) else []
+            else:
+                carriers = response if isinstance(response, list) else []
+            
+            # Count statistics
+            total_count = len(carriers)
+            active_count = sum(1 for c in carriers if isinstance(c, dict) and c.get('active', False))
+            domestic_count = sum(1 for c in carriers if isinstance(c, dict) and c.get('domestic', False))
+            regional_count = sum(1 for c in carriers if isinstance(c, dict) and c.get('regional', False))
+            international_count = sum(1 for c in carriers if isinstance(c, dict) and c.get('international', False))
+            
+            return jsonify({
+                "status": "success",
+                "message": "Carriers retrieved successfully",
+                "data": {
+                    "carriers": carriers,
+                    "statistics": {
+                        "total": total_count,
+                        "active": active_count,
+                        "domestic": domestic_count,
+                        "regional": regional_count,
+                        "international": international_count
+                    }
+                }
+            }), 200
+            
+        except TerminalAPIError as e:
+            return jsonify({
+                "status": "error",
+                "message": f"Terminal API error: {e.message}",
+                "error_code": e.status_code
+            }), 500
+            
+    except Exception as e:
+        logger.error(f"Error fetching Terminal carriers: {str(e)}")
+        return jsonify({"status": "error", "message": f"Server error: {str(e)}"}), 500
+
+
+@admin_shipping_bp.route("/api/admin/terminal/carriers/<string:carrier_id>/enable", methods=["POST"])
+@admin_required
+def enable_terminal_carrier(current_admin, carrier_id):
+    """
+    Enable a Terminal Africa carrier (admin only).
+    
+    Args:
+        carrier_id: Terminal carrier ID
+    """
+    try:
+        from services.terminal_service import get_terminal_client, TerminalAPIError
+        
+        client = get_terminal_client()
+        
+        try:
+            response = client.enable_carrier(carrier_id)
+            
+            logger.info(f"Carrier {carrier_id} enabled by admin {current_admin['id']}")
+            
+            return jsonify({
+                "status": "success",
+                "message": f"Carrier {carrier_id} enabled successfully",
+                "data": response.get('data', response)
+            }), 200
+            
+        except TerminalAPIError as e:
+            return jsonify({
+                "status": "error",
+                "message": f"Terminal API error: {e.message}",
+                "error_code": e.status_code
+            }), 500
+            
+    except Exception as e:
+        logger.error(f"Error enabling carrier: {str(e)}")
+        return jsonify({"status": "error", "message": f"Server error: {str(e)}"}), 500
+
+
+@admin_shipping_bp.route("/api/admin/terminal/carriers/<string:carrier_id>/disable", methods=["POST"])
+@admin_required
+def disable_terminal_carrier(current_admin, carrier_id):
+    """
+    Disable a Terminal Africa carrier (admin only).
+    
+    Args:
+        carrier_id: Terminal carrier ID
+    """
+    try:
+        from services.terminal_service import get_terminal_client, TerminalAPIError
+        
+        client = get_terminal_client()
+        
+        try:
+            response = client.disable_carrier(carrier_id)
+            
+            logger.info(f"Carrier {carrier_id} disabled by admin {current_admin['id']}")
+            
+            return jsonify({
+                "status": "success",
+                "message": f"Carrier {carrier_id} disabled successfully",
+                "data": response.get('data', response)
+            }), 200
+            
+        except TerminalAPIError as e:
+            return jsonify({
+                "status": "error",
+                "message": f"Terminal API error: {e.message}",
+                "error_code": e.status_code
+            }), 500
+            
+    except Exception as e:
+        logger.error(f"Error disabling carrier: {str(e)}")
+        return jsonify({"status": "error", "message": f"Server error: {str(e)}"}), 500
+
+
+@admin_shipping_bp.route("/api/admin/terminal/packaging", methods=["GET"])
+@admin_required
+def get_terminal_packaging_admin(current_admin):
+    """
+    Get all Terminal Africa packaging options (admin only).
+    
+    Query Parameters:
+        - page: Page number (default: 1)
+        - per_page: Items per page (default: 50, max: 100)
+    """
+    try:
+        from services.terminal_service import get_terminal_client, TerminalAPIError
+        
+        page = max(int(request.args.get("page", 1)), 1)
+        per_page = min(max(int(request.args.get("per_page", 50)), 1), 100)
+        
+        client = get_terminal_client()
+        
+        try:
+            response = client.get_packaging(page=page, per_page=per_page)
+            
+            # Handle nested response
+            if 'data' in response:
+                packaging_data = response['data']
+                if isinstance(packaging_data, dict) and 'packaging' in packaging_data:
+                    packaging = packaging_data['packaging']
+                    pagination = packaging_data.get('pagination', {})
+                else:
+                    packaging = packaging_data if isinstance(packaging_data, list) else []
+                    pagination = response.get('pagination', {})
+            else:
+                packaging = response if isinstance(response, list) else []
+                pagination = {}
+            
+            return jsonify({
+                "status": "success",
+                "message": "Packaging options retrieved successfully",
+                "data": {
+                    "packaging": packaging,
+                    "count": len(packaging),
+                    "pagination": pagination
+                }
+            }), 200
+            
+        except TerminalAPIError as e:
+            return jsonify({
+                "status": "error",
+                "message": f"Terminal API error: {e.message}",
+                "error_code": e.status_code
+            }), 500
+            
+    except Exception as e:
+        logger.error(f"Error fetching Terminal packaging: {str(e)}")
+        return jsonify({"status": "error", "message": f"Server error: {str(e)}"}), 500
+
+
+@admin_shipping_bp.route("/api/admin/terminal/packaging", methods=["POST"])
+@admin_required
+def create_terminal_packaging_admin(current_admin):
+    """
+    Create a new packaging option in Terminal Africa (admin only).
+    
+    Expected JSON body:
+    {
+        "name": "Large Box",
+        "type": "box",
+        "length": 40,
+        "width": 30,
+        "height": 20,
+        "weight": 1.0,
+        "size_unit": "cm",
+        "weight_unit": "kg"
+    }
+    """
+    try:
+        from services.terminal_service import get_terminal_client, TerminalAPIError
+        
+        data = request.get_json()
+        
+        # Validate required fields
+        required_fields = ["name", "type", "length", "width", "height", "weight"]
+        for field in required_fields:
+            if field not in data:
+                return jsonify({
+                    "status": "error",
+                    "message": f"'{field}' is required"
+                }), 400
+        
+        # Validate type
+        valid_types = ["box", "envelope", "soft-packaging"]
+        if data["type"] not in valid_types:
+            return jsonify({
+                "status": "error",
+                "message": f"'type' must be one of: {', '.join(valid_types)}"
+            }), 400
+        
+        client = get_terminal_client()
+        
+        try:
+            response = client.create_packaging(
+                name=data["name"],
+                type=data["type"],
+                length=float(data["length"]),
+                width=float(data["width"]),
+                height=float(data["height"]),
+                weight=float(data["weight"]),
+                size_unit=data.get("size_unit", "cm"),
+                weight_unit=data.get("weight_unit", "kg")
+            )
+            
+            packaging = response.get('data', response)
+            
+            logger.info(f"Packaging created by admin {current_admin['id']}: {data['name']}")
+            
+            return jsonify({
+                "status": "success",
+                "message": "Packaging created successfully",
+                "data": {"packaging": packaging}
+            }), 201
+            
+        except TerminalAPIError as e:
+            return jsonify({
+                "status": "error",
+                "message": f"Terminal API error: {e.message}",
+                "error_code": e.status_code
+            }), 500
+            
+    except Exception as e:
+        logger.error(f"Error creating Terminal packaging: {str(e)}")
+        return jsonify({"status": "error", "message": f"Server error: {str(e)}"}), 500
+
+
+@admin_shipping_bp.route("/api/admin/terminal/packaging/<string:packaging_id>", methods=["DELETE"])
+@admin_required
+def delete_terminal_packaging_admin(current_admin, packaging_id):
+    """
+    Delete a packaging option from Terminal Africa (admin only).
+    
+    Args:
+        packaging_id: Terminal packaging ID
+    """
+    try:
+        from services.terminal_service import get_terminal_client, TerminalAPIError
+        
+        client = get_terminal_client()
+        
+        try:
+            response = client.delete_packaging(packaging_id)
+            
+            logger.info(f"Packaging {packaging_id} deleted by admin {current_admin['id']}")
+            
+            return jsonify({
+                "status": "success",
+                "message": f"Packaging {packaging_id} deleted successfully"
+            }), 200
+            
+        except TerminalAPIError as e:
+            return jsonify({
+                "status": "error",
+                "message": f"Terminal API error: {e.message}",
+                "error_code": e.status_code
+            }), 500
+            
+    except Exception as e:
+        logger.error(f"Error deleting Terminal packaging: {str(e)}")
+        return jsonify({"status": "error", "message": f"Server error: {str(e)}"}), 500
+
+
+@admin_shipping_bp.route("/api/admin/terminal/shipments", methods=["GET"])
+@admin_required
+def get_terminal_shipments_admin(current_admin):
+    """
+    Get all Terminal Africa shipments (admin only).
+    
+    Query Parameters:
+        - page: Page number (default: 1)
+        - per_page: Items per page (default: 20, max: 100)
+        - status: Filter by status (optional)
+    """
+    try:
+        from services.terminal_service import get_terminal_client, TerminalAPIError
+        
+        page = max(int(request.args.get("page", 1)), 1)
+        per_page = min(max(int(request.args.get("per_page", 20)), 1), 100)
+        status = request.args.get("status")
+        
+        client = get_terminal_client()
+        
+        try:
+            response = client.get_shipments(page=page, per_page=per_page, status=status)
+            
+            # Handle nested response
+            if 'data' in response:
+                shipments_data = response['data']
+                if isinstance(shipments_data, dict) and 'shipments' in shipments_data:
+                    shipments = shipments_data['shipments']
+                    pagination = shipments_data.get('pagination', {})
+                else:
+                    shipments = shipments_data if isinstance(shipments_data, list) else []
+                    pagination = response.get('pagination', {})
+            else:
+                shipments = response if isinstance(response, list) else []
+                pagination = {}
+            
+            return jsonify({
+                "status": "success",
+                "message": "Shipments retrieved successfully",
+                "data": {
+                    "shipments": shipments,
+                    "count": len(shipments),
+                    "pagination": pagination
+                }
+            }), 200
+            
+        except TerminalAPIError as e:
+            return jsonify({
+                "status": "error",
+                "message": f"Terminal API error: {e.message}",
+                "error_code": e.status_code
+            }), 500
+            
+    except Exception as e:
+        logger.error(f"Error fetching Terminal shipments: {str(e)}")
+        return jsonify({"status": "error", "message": f"Server error: {str(e)}"}), 500
+
+
+@admin_shipping_bp.route("/api/admin/terminal/reports/shipping", methods=["GET"])
+@admin_required
+def get_terminal_shipping_reports(current_admin):
+    """
+    Generate Terminal Africa shipping analytics and reports (admin only).
+    
+    Query parameters:
+    - start_date: YYYY-MM-DD (default: 30 days ago)
+    - end_date: YYYY-MM-DD (default: today)
+    """
+    try:
+        # Parse date range
+        end_date = request.args.get("end_date", datetime.now().strftime("%Y-%m-%d"))
+        start_date = request.args.get("start_date", (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d"))
+        
+        conn = get_db_connection()
+        try:
+            with conn.cursor() as cursor:
+                # Total Terminal shipments
+                cursor.execute(
+                    """
+                    SELECT 
+                        COUNT(*) as total_shipments,
+                        SUM(shipping_cost) as total_shipping_cost,
+                        AVG(shipping_cost) as avg_shipping_cost
+                    FROM orders
+                    WHERE created_at BETWEEN %s AND %s
+                    AND terminal_shipment_id IS NOT NULL
+                    """,
+                    (start_date, end_date)
+                )
+                shipping_summary = cursor.fetchone()
+                
+                # Carrier breakdown
+                cursor.execute(
+                    """
+                    SELECT 
+                        terminal_carrier_name,
+                        COUNT(*) as shipment_count,
+                        SUM(shipping_cost) as total_cost,
+                        AVG(shipping_cost) as avg_cost
+                    FROM orders
+                    WHERE created_at BETWEEN %s AND %s
+                    AND terminal_carrier_name IS NOT NULL
+                    GROUP BY terminal_carrier_name
+                    ORDER BY shipment_count DESC
+                    """,
+                    (start_date, end_date)
+                )
+                carrier_breakdown = cursor.fetchall()
+                
+                # Order status breakdown (using order_status instead of terminal_status)
+                cursor.execute(
+                    """
+                    SELECT 
+                        order_status,
+                        COUNT(*) as count
+                    FROM orders
+                    WHERE created_at BETWEEN %s AND %s
+                    AND terminal_shipment_id IS NOT NULL
+                    GROUP BY order_status
+                    ORDER BY count DESC
+                    """,
+                    (start_date, end_date)
+                )
+                status_breakdown = cursor.fetchall()
+                
+                # Build report
+                report = {
+                    "period": {
+                        "start_date": start_date,
+                        "end_date": end_date
+                    },
+                    "summary": {
+                        "total_shipments": shipping_summary["total_shipments"] or 0,
+                        "total_shipping_cost": float(shipping_summary["total_shipping_cost"] or 0),
+                        "avg_shipping_cost": float(shipping_summary["avg_shipping_cost"] or 0)
+                    },
+                    "carriers": [
+                        {
+                            "carrier": c["terminal_carrier_name"],
+                            "shipment_count": c["shipment_count"],
+                            "total_cost": float(c["total_cost"]),
+                            "avg_cost": float(c["avg_cost"])
+                        }
+                        for c in carrier_breakdown
+                    ],
+                    "status_breakdown": [
+                        {
+                            "status": s["order_status"],
+                            "count": s["count"]
+                        }
+                        for s in status_breakdown
+                    ]
+                }
+                
+                return jsonify({
+                    "status": "success",
+                    "data": report
+                }), 200
+                
+        finally:
+            conn.close()
+            
+    except Exception as e:
+        logger.error(f"Error generating Terminal shipping report: {str(e)}")
+        return jsonify({"status": "error", "message": f"Server error: {str(e)}"}), 500
+
+
+# Import json for webhook retry
+import json
+from services.shipment_manager import map_sendbox_status_to_internal

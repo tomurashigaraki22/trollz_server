@@ -1111,3 +1111,352 @@ def bulk_sync_tracking(current_admin):
             "status": "error",
             "message": f"Server error: {str(e)}"
         }), 500
+
+
+# ──────────────────────────────────────────────
+# TERMINAL AFRICA - SHIPMENTS (PHASE 5)
+# ──────────────────────────────────────────────
+
+@shipping_bp.route("/api/shipping/shipments", methods=["POST"])
+@token_required
+def create_shipment(current_user):
+    """
+    Create a shipment from a selected rate.
+    
+    Expected JSON body:
+    {
+        "rate_id": "RT-ABC123",  // Terminal rate ID from rates endpoint
+        "origin_address_id": 15,  // Local address ID
+        "destination_address_id": 14,  // Local address ID
+        "parcel_id": "PC-XYZ789",  // Terminal parcel ID from rates endpoint
+        "metadata": {  // Optional
+            "order_id": 123,
+            "customer_notes": "Handle with care"
+        }
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        # Validate required fields
+        required = ["rate_id", "origin_address_id", "destination_address_id", "parcel_id"]
+        for field in required:
+            if field not in data:
+                return jsonify({
+                    "status": "error",
+                    "message": f"'{field}' is required"
+                }), 400
+        
+        rate_id = data["rate_id"]
+        origin_address_id = data["origin_address_id"]
+        destination_address_id = data["destination_address_id"]
+        parcel_id = data["parcel_id"]
+        metadata = data.get("metadata", {})
+        
+        conn = get_db_connection()
+        try:
+            with conn.cursor() as cursor:
+                # Verify addresses belong to user and are synced
+                cursor.execute(
+                    """
+                    SELECT terminal_address_id FROM shipping_addresses
+                    WHERE id = %s AND user_id = %s
+                    """,
+                    (origin_address_id, current_user["id"])
+                )
+                origin = cursor.fetchone()
+                
+                cursor.execute(
+                    """
+                    SELECT terminal_address_id FROM shipping_addresses
+                    WHERE id = %s AND user_id = %s
+                    """,
+                    (destination_address_id, current_user["id"])
+                )
+                destination = cursor.fetchone()
+                
+                if not origin or not destination:
+                    return jsonify({
+                        "status": "error",
+                        "message": "One or both addresses not found"
+                    }), 404
+                
+                if not origin["terminal_address_id"] or not destination["terminal_address_id"]:
+                    return jsonify({
+                        "status": "error",
+                        "message": "Both addresses must be synced to Terminal Africa"
+                    }), 400
+                
+                # Create shipment via Terminal
+                client = get_terminal_client()
+                
+                try:
+                    shipment_response = client.create_shipment(
+                        rate_id=rate_id,
+                        origin_address_id=origin["terminal_address_id"],
+                        destination_address_id=destination["terminal_address_id"],
+                        parcel_id=parcel_id,
+                        metadata=metadata
+                    )
+                    
+                    # Extract shipment data
+                    shipment_data = shipment_response.get('data', shipment_response)
+                    
+                    return jsonify({
+                        "status": "success",
+                        "message": "Shipment created successfully",
+                        "data": {
+                            "shipment": shipment_data
+                        }
+                    }), 201
+                    
+                except TerminalAPIError as e:
+                    return jsonify({
+                        "status": "error",
+                        "message": f"Terminal API error: {e.message}",
+                        "error_code": e.status_code
+                    }), 500
+                    
+        finally:
+            conn.close()
+            
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": f"Server error: {str(e)}"
+        }), 500
+
+
+@shipping_bp.route("/api/shipping/shipments", methods=["GET"])
+@token_required
+def get_shipments(current_user):
+    """
+    Get all shipments for the current user.
+    
+    Query Parameters:
+        - page: Page number (default: 1)
+        - per_page: Items per page (default: 20, max: 100)
+        - status: Filter by status (optional)
+    """
+    try:
+        page = max(int(request.args.get("page", 1)), 1)
+        per_page = min(max(int(request.args.get("per_page", 20)), 1), 100)
+        status = request.args.get("status")
+        
+        client = get_terminal_client()
+        
+        try:
+            response = client.get_shipments(page=page, per_page=per_page, status=status)
+            
+            # Handle nested response
+            if 'data' in response:
+                shipments_data = response['data']
+                if isinstance(shipments_data, dict) and 'shipments' in shipments_data:
+                    shipments = shipments_data['shipments']
+                    pagination = shipments_data.get('pagination', {})
+                else:
+                    shipments = shipments_data if isinstance(shipments_data, list) else []
+                    pagination = response.get('pagination', {})
+            else:
+                shipments = response if isinstance(response, list) else []
+                pagination = {}
+            
+            return jsonify({
+                "status": "success",
+                "message": "Shipments retrieved successfully",
+                "data": {
+                    "shipments": shipments,
+                    "count": len(shipments),
+                    "pagination": pagination
+                }
+            }), 200
+            
+        except TerminalAPIError as e:
+            return jsonify({
+                "status": "error",
+                "message": f"Terminal API error: {e.message}",
+                "error_code": e.status_code
+            }), 500
+            
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": f"Server error: {str(e)}"
+        }), 500
+
+
+@shipping_bp.route("/api/shipping/shipments/<string:shipment_id>", methods=["GET"])
+@token_required
+def get_shipment_details(current_user, shipment_id):
+    """
+    Get details of a specific shipment.
+    
+    Path Parameters:
+        - shipment_id: Terminal shipment ID
+    """
+    try:
+        client = get_terminal_client()
+        
+        try:
+            response = client.get_shipment(shipment_id)
+            
+            # Handle nested response
+            shipment = response.get('data', response)
+            
+            return jsonify({
+                "status": "success",
+                "message": "Shipment details retrieved successfully",
+                "data": {
+                    "shipment": shipment
+                }
+            }), 200
+            
+        except TerminalAPIError as e:
+            if e.status_code == 404:
+                return jsonify({
+                    "status": "error",
+                    "message": "Shipment not found"
+                }), 404
+            return jsonify({
+                "status": "error",
+                "message": f"Terminal API error: {e.message}",
+                "error_code": e.status_code
+            }), 500
+            
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": f"Server error: {str(e)}"
+        }), 500
+
+
+@shipping_bp.route("/api/shipping/shipments/<string:shipment_id>/cancel", methods=["POST"])
+@token_required
+def cancel_shipment(current_user, shipment_id):
+    """
+    Cancel a shipment.
+    
+    Path Parameters:
+        - shipment_id: Terminal shipment ID
+    """
+    try:
+        client = get_terminal_client()
+        
+        try:
+            response = client.cancel_shipment(shipment_id)
+            
+            return jsonify({
+                "status": "success",
+                "message": "Shipment cancelled successfully",
+                "data": response.get('data', response)
+            }), 200
+            
+        except TerminalAPIError as e:
+            if e.status_code == 404:
+                return jsonify({
+                    "status": "error",
+                    "message": "Shipment not found"
+                }), 404
+            return jsonify({
+                "status": "error",
+                "message": f"Terminal API error: {e.message}",
+                "error_code": e.status_code
+            }), 500
+            
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": f"Server error: {str(e)}"
+        }), 500
+
+
+# ──────────────────────────────────────────────
+# TERMINAL AFRICA - TRACKING (PHASE 6)
+# ──────────────────────────────────────────────
+
+@shipping_bp.route("/api/shipping/track/<string:shipment_id>", methods=["GET"])
+def track_shipment_by_id(shipment_id):
+    """
+    Track a shipment by Terminal shipment ID (public endpoint).
+    
+    Path Parameters:
+        - shipment_id: Terminal shipment ID
+    """
+    try:
+        client = get_terminal_client()
+        
+        try:
+            response = client.track_shipment(shipment_id)
+            
+            # Handle nested response
+            tracking_data = response.get('data', response)
+            
+            return jsonify({
+                "status": "success",
+                "message": "Tracking information retrieved successfully",
+                "data": {
+                    "tracking": tracking_data
+                }
+            }), 200
+            
+        except TerminalAPIError as e:
+            if e.status_code == 404:
+                return jsonify({
+                    "status": "error",
+                    "message": "Shipment not found"
+                }), 404
+            return jsonify({
+                "status": "error",
+                "message": f"Terminal API error: {e.message}",
+                "error_code": e.status_code
+            }), 500
+            
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": f"Server error: {str(e)}"
+        }), 500
+
+
+@shipping_bp.route("/api/shipping/track/number/<string:tracking_number>", methods=["GET"])
+def track_by_tracking_number(tracking_number):
+    """
+    Track a shipment by carrier tracking number (public endpoint).
+    
+    Path Parameters:
+        - tracking_number: Carrier tracking number
+    """
+    try:
+        client = get_terminal_client()
+        
+        try:
+            response = client.track_by_tracking_number(tracking_number)
+            
+            # Handle nested response
+            tracking_data = response.get('data', response)
+            
+            return jsonify({
+                "status": "success",
+                "message": "Tracking information retrieved successfully",
+                "data": {
+                    "tracking": tracking_data
+                }
+            }), 200
+            
+        except TerminalAPIError as e:
+            if e.status_code == 404:
+                return jsonify({
+                    "status": "error",
+                    "message": "Tracking number not found"
+                }), 404
+            return jsonify({
+                "status": "error",
+                "message": f"Terminal API error: {e.message}",
+                "error_code": e.status_code
+            }), 500
+            
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": f"Server error: {str(e)}"
+        }), 500
