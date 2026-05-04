@@ -1,14 +1,18 @@
 """
 Address Management Routes
-Handles CRUD operations for user shipping addresses.
+Handles CRUD operations for user shipping addresses with Terminal Africa integration.
 """
 
 from flask import Blueprint, request, jsonify
 from db import get_db_connection
 from middleware.auth_middleware import token_required
 from services.address_validator import validate_address, format_phone_number, get_state_code
+from services.terminal_address_manager import get_address_manager
+from services.terminal_service import TerminalAPIError
+import logging
 
 addresses_bp = Blueprint("addresses", __name__)
+logger = logging.getLogger(__name__)
 
 
 def _serialize_address(row):
@@ -39,7 +43,7 @@ def _serialize_address(row):
 @token_required
 def create_address(current_user):
     """
-    Create a new shipping address for the current user.
+    Create a new shipping address for the current user and sync to Terminal Africa.
     
     Expected JSON body:
     {
@@ -76,7 +80,7 @@ def create_address(current_user):
             "first_name": data["first_name"].strip(),
             "last_name": data["last_name"].strip(),
             "phone": phone,
-            "email": data.get("email", "").strip() or None,
+            "email": data.get("email", "").strip() or current_user.get("email", ""),
             "street": data["street"].strip(),
             "street_line_2": data.get("street_line_2", "").strip() or None,
             "city": data["city"].strip(),
@@ -135,6 +139,42 @@ def create_address(current_user):
                 )
                 address_id = cursor.lastrowid
                 
+                # Sync to Terminal Africa
+                terminal_address_id = None
+                terminal_sync_error = None
+                
+                try:
+                    address_mgr = get_address_manager()
+                    result = address_mgr.create_and_sync_address(
+                        user_id=current_user["id"],
+                        first_name=address_data["first_name"],
+                        last_name=address_data["last_name"],
+                        phone=address_data["phone"],
+                        email=address_data["email"],
+                        line1=address_data["street"],
+                        line2=address_data["street_line_2"],
+                        city=address_data["city"],
+                        state=address_data["state"],
+                        country=address_data["country"],
+                        zip_code=address_data["post_code"],
+                        is_residential=True
+                    )
+                    terminal_address_id = result.get("terminal_address_id")
+                    
+                    # Store terminal_address_id in shipping_addresses table
+                    if terminal_address_id:
+                        cursor.execute(
+                            "UPDATE shipping_addresses SET terminal_address_id = %s WHERE id = %s",
+                            (terminal_address_id, address_id)
+                        )
+                        logger.info(f"Address synced to Terminal: {terminal_address_id}")
+                except TerminalAPIError as e:
+                    terminal_sync_error = str(e)
+                    logger.warning(f"Failed to sync address to Terminal: {e.message}")
+                except Exception as e:
+                    terminal_sync_error = str(e)
+                    logger.warning(f"Failed to sync address to Terminal: {str(e)}")
+                
                 # Fetch created address
                 cursor.execute(
                     "SELECT * FROM shipping_addresses WHERE id = %s",
@@ -144,10 +184,21 @@ def create_address(current_user):
                 
                 conn.commit()
                 
+                response_data = {
+                    "address": _serialize_address(address),
+                    "terminal_synced": terminal_address_id is not None,
+                }
+                
+                if terminal_address_id:
+                    response_data["terminal_address_id"] = terminal_address_id
+                
+                if terminal_sync_error:
+                    response_data["terminal_sync_warning"] = terminal_sync_error
+                
                 return jsonify({
                     "status": "success",
                     "message": "Address created successfully",
-                    "data": {"address": _serialize_address(address)}
+                    "data": response_data
                 }), 201
                 
         except Exception as e:
@@ -166,7 +217,7 @@ def create_address(current_user):
 @addresses_bp.route("/api/addresses", methods=["GET"])
 @token_required
 def get_addresses(current_user):
-    """Get all shipping addresses for the current user."""
+    """Get all shipping addresses for the current user with Terminal sync status."""
     try:
         conn = get_db_connection()
         try:
@@ -181,11 +232,28 @@ def get_addresses(current_user):
                 )
                 addresses = cursor.fetchall()
                 
+                # Serialize addresses and add Terminal sync status
+                serialized_addresses = []
+                for addr in addresses:
+                    serialized = _serialize_address(addr)
+                    
+                    # Check if address is synced to Terminal (has terminal_address_id)
+                    terminal_address_id = addr.get('terminal_address_id')
+                    serialized['terminal_synced'] = terminal_address_id is not None
+                    if terminal_address_id:
+                        serialized['terminal_address_id'] = terminal_address_id
+                    
+                    serialized_addresses.append(serialized)
+                
+                # Count synced addresses
+                terminal_count = sum(1 for addr in addresses if addr.get('terminal_address_id'))
+                
                 return jsonify({
                     "status": "success",
                     "data": {
-                        "addresses": [_serialize_address(addr) for addr in addresses],
-                        "count": len(addresses)
+                        "addresses": serialized_addresses,
+                        "count": len(addresses),
+                        "terminal_count": terminal_count
                     }
                 }), 200
         finally:
@@ -468,6 +536,183 @@ def get_default_address(current_user):
                     "status": "success",
                     "data": {"address": _serialize_address(address)}
                 }), 200
+        finally:
+            conn.close()
+            
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": f"Server error: {str(e)}"
+        }), 500
+
+
+@addresses_bp.route("/api/addresses/validate", methods=["POST"])
+def validate_address_endpoint():
+    """
+    Validate an address without saving it.
+    
+    Expected JSON body:
+    {
+        "address": "123 Main Street",
+        "city": "Lagos",
+        "state": "Lagos",
+        "country": "NG"
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({
+                "status": "error",
+                "message": "No data provided"
+            }), 400
+        
+        # Validate required fields
+        required = ["address", "city", "state"]
+        for field in required:
+            if field not in data or not data[field]:
+                return jsonify({
+                    "status": "error",
+                    "message": f"'{field}' is required"
+                }), 400
+        
+        # Prepare address data for validation
+        address_data = {
+            "street": data["address"].strip(),
+            "city": data["city"].strip(),
+            "state": data["state"].strip(),
+            "country": data.get("country", "NG").upper().strip(),
+            "post_code": data.get("postal_code") or data.get("post_code"),
+            "first_name": "Test",
+            "last_name": "User",
+            "phone": "+2348000000000"
+        }
+        
+        # Validate address
+        is_valid, error = validate_address(address_data)
+        
+        if is_valid:
+            return jsonify({
+                "status": "success",
+                "data": {
+                    "valid": True,
+                    "message": "Address is valid",
+                    "address": {
+                        "street": address_data["street"],
+                        "city": address_data["city"],
+                        "state": address_data["state"],
+                        "country": address_data["country"]
+                    }
+                }
+            }), 200
+        else:
+            return jsonify({
+                "status": "success",
+                "data": {
+                    "valid": False,
+                    "message": error,
+                    "errors": [error]
+                }
+            }), 200
+            
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": f"Server error: {str(e)}"
+        }), 500
+
+
+@addresses_bp.route("/api/addresses/terminal", methods=["GET"])
+@token_required
+def get_terminal_addresses(current_user):
+    """Get all Terminal Africa addresses for the current user."""
+    try:
+        address_mgr = get_address_manager()
+        terminal_addresses = address_mgr.get_user_addresses(current_user["id"])
+        
+        return jsonify({
+            "status": "success",
+            "data": {
+                "addresses": terminal_addresses,
+                "count": len(terminal_addresses)
+            }
+        }), 200
+        
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": f"Server error: {str(e)}"
+        }), 500
+
+
+@addresses_bp.route("/api/addresses/<int:address_id>/sync-terminal", methods=["POST"])
+@token_required
+def sync_address_to_terminal(current_user, address_id):
+    """Sync an existing address to Terminal Africa."""
+    try:
+        conn = get_db_connection()
+        try:
+            with conn.cursor() as cursor:
+                # Get the address
+                cursor.execute(
+                    """
+                    SELECT * FROM shipping_addresses
+                    WHERE id = %s AND user_id = %s
+                    """,
+                    (address_id, current_user["id"])
+                )
+                address = cursor.fetchone()
+                
+                if not address:
+                    return jsonify({
+                        "status": "error",
+                        "message": "Address not found"
+                    }), 404
+                
+                # Sync to Terminal
+                try:
+                    address_mgr = get_address_manager()
+                    result = address_mgr.create_and_sync_address(
+                        user_id=current_user["id"],
+                        first_name=address["first_name"],
+                        last_name=address["last_name"],
+                        phone=address["phone"],
+                        email=address["email"] or current_user.get("email", ""),
+                        line1=address["street"],
+                        line2=address["street_line_2"],
+                        city=address["city"],
+                        state=address["state"],
+                        country=address["country"],
+                        zip_code=address["post_code"],
+                        is_residential=True
+                    )
+                    
+                    terminal_address_id = result.get("terminal_address_id")
+                    
+                    # Store terminal_address_id in shipping_addresses table
+                    if terminal_address_id:
+                        cursor.execute(
+                            "UPDATE shipping_addresses SET terminal_address_id = %s WHERE id = %s",
+                            (terminal_address_id, address_id)
+                        )
+                        conn.commit()
+                    
+                    return jsonify({
+                        "status": "success",
+                        "message": "Address synced to Terminal Africa successfully",
+                        "data": {
+                            "terminal_address_id": terminal_address_id,
+                            "local_address_id": result.get("local_address_id")
+                        }
+                    }), 200
+                    
+                except TerminalAPIError as e:
+                    return jsonify({
+                        "status": "error",
+                        "message": f"Terminal API error: {e.message}"
+                    }), 400
+                    
         finally:
             conn.close()
             

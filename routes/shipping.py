@@ -1,11 +1,13 @@
 """
 Shipping Routes
 Handles shipping quotes, shipment creation, and tracking operations.
+Now using Terminal Africa API for multi-carrier shipping.
 """
 
 from flask import Blueprint, request, jsonify
 from db import get_db_connection
 from middleware.auth_middleware import token_required, admin_required
+from services.terminal_service import get_terminal_client, TerminalAPIError
 from services.sendbox_service import get_sendbox_client, SendboxAPIError
 from services.address_validator import format_address_for_sendbox, calculate_service_type
 from config import Config
@@ -40,7 +42,454 @@ def _serialize_quote(row):
 
 
 # ──────────────────────────────────────────────
-# SHIPPING QUOTES
+# TERMINAL AFRICA - CARRIERS
+# ──────────────────────────────────────────────
+
+@shipping_bp.route("/api/shipping/carriers", methods=["GET"])
+@token_required
+def get_carriers(current_user):
+    """
+    Get available carriers from Terminal Africa.
+    
+    Query Parameters:
+        - active: Filter by active status (true/false)
+        - domestic: Filter domestic carriers (true/false)
+        - regional: Filter regional carriers (true/false)
+        - international: Filter international carriers (true/false)
+    
+    Returns:
+        List of available carriers with their details
+    """
+    try:
+        # Get filter parameters
+        active = request.args.get("active")
+        domestic = request.args.get("domestic")
+        regional = request.args.get("regional")
+        international = request.args.get("international")
+        
+        # Convert string to boolean
+        def str_to_bool(val):
+            if val is None:
+                return None
+            return val.lower() in ['true', '1', 'yes']
+        
+        active = str_to_bool(active)
+        domestic = str_to_bool(domestic)
+        regional = str_to_bool(regional)
+        international = str_to_bool(international)
+        
+        # Get carriers from Terminal Africa
+        client = get_terminal_client()
+        
+        try:
+            response = client.get_carriers(
+                active=active,
+                domestic=domestic,
+                regional=regional,
+                international=international
+            )
+            
+            # Handle nested response structure
+            if 'data' in response:
+                carriers_data = response['data']
+                
+                # Check if carriers is nested further
+                if isinstance(carriers_data, dict) and 'carriers' in carriers_data:
+                    carriers = carriers_data['carriers']
+                else:
+                    carriers = carriers_data if isinstance(carriers_data, list) else []
+            else:
+                carriers = response if isinstance(response, list) else []
+            
+            # Count active carriers
+            active_count = sum(1 for c in carriers if isinstance(c, dict) and c.get('active', False))
+            
+            return jsonify({
+                "status": "success",
+                "message": "Carriers retrieved successfully",
+                "data": {
+                    "carriers": carriers,
+                    "count": len(carriers),
+                    "active_count": active_count
+                }
+            }), 200
+            
+        except TerminalAPIError as e:
+            return jsonify({
+                "status": "error",
+                "message": f"Terminal API error: {e.message}",
+                "error_code": e.status_code
+            }), 500
+            
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": f"Server error: {str(e)}"
+        }), 500
+
+
+# ──────────────────────────────────────────────
+# TERMINAL AFRICA - PACKAGING
+# ──────────────────────────────────────────────
+
+@shipping_bp.route("/api/shipping/packaging", methods=["GET"])
+@token_required
+def get_packaging(current_user):
+    """
+    Get available packaging options from Terminal Africa.
+    
+    Query Parameters:
+        - page: Page number (default: 1)
+        - per_page: Items per page (default: 20, max: 100)
+    
+    Returns:
+        List of packaging options with dimensions and weights
+    """
+    try:
+        page = max(int(request.args.get("page", 1)), 1)
+        per_page = min(max(int(request.args.get("per_page", 20)), 1), 100)
+        
+        # Get packaging from Terminal Africa
+        client = get_terminal_client()
+        
+        try:
+            response = client.get_packaging(page=page, per_page=per_page)
+            
+            # Handle nested response structure
+            if 'data' in response:
+                packaging_data = response['data']
+                
+                # Check if packaging is nested further
+                if isinstance(packaging_data, dict) and 'packaging' in packaging_data:
+                    packaging = packaging_data['packaging']
+                    pagination = packaging_data.get('pagination', {})
+                else:
+                    packaging = packaging_data if isinstance(packaging_data, list) else []
+                    pagination = response.get('pagination', {})
+            else:
+                packaging = response if isinstance(response, list) else []
+                pagination = {}
+            
+            return jsonify({
+                "status": "success",
+                "message": "Packaging options retrieved successfully",
+                "data": {
+                    "packaging": packaging,
+                    "count": len(packaging),
+                    "pagination": pagination
+                }
+            }), 200
+            
+        except TerminalAPIError as e:
+            return jsonify({
+                "status": "error",
+                "message": f"Terminal API error: {e.message}",
+                "error_code": e.status_code
+            }), 500
+            
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": f"Server error: {str(e)}"
+        }), 500
+
+
+@shipping_bp.route("/api/shipping/packaging", methods=["POST"])
+@token_required
+def create_packaging(current_user):
+    """
+    Create a new packaging option in Terminal Africa.
+    
+    Expected JSON body:
+    {
+        "name": "Small Box",
+        "type": "box",  // box, envelope, or soft-packaging
+        "length": 20,
+        "width": 15,
+        "height": 10,
+        "weight": 0.5,
+        "size_unit": "cm",  // cm or in
+        "weight_unit": "kg"  // kg or lb
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        # Validate required fields
+        required_fields = ["name", "type", "length", "width", "height", "weight"]
+        for field in required_fields:
+            if field not in data:
+                return jsonify({
+                    "status": "error",
+                    "message": f"'{field}' is required"
+                }), 400
+        
+        # Validate type
+        valid_types = ["box", "envelope", "soft-packaging"]
+        if data["type"] not in valid_types:
+            return jsonify({
+                "status": "error",
+                "message": f"'type' must be one of: {', '.join(valid_types)}"
+            }), 400
+        
+        # Create packaging
+        client = get_terminal_client()
+        
+        try:
+            response = client.create_packaging(
+                name=data["name"],
+                type=data["type"],
+                length=float(data["length"]),
+                width=float(data["width"]),
+                height=float(data["height"]),
+                weight=float(data["weight"]),
+                size_unit=data.get("size_unit", "cm"),
+                weight_unit=data.get("weight_unit", "kg")
+            )
+            
+            # Handle nested response
+            packaging = response.get('data', response)
+            
+            return jsonify({
+                "status": "success",
+                "message": "Packaging created successfully",
+                "data": {"packaging": packaging}
+            }), 201
+            
+        except TerminalAPIError as e:
+            return jsonify({
+                "status": "error",
+                "message": f"Terminal API error: {e.message}",
+                "error_code": e.status_code
+            }), 500
+            
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": f"Server error: {str(e)}"
+        }), 500
+
+
+# ──────────────────────────────────────────────
+# TERMINAL AFRICA - RATES
+# ──────────────────────────────────────────────
+
+@shipping_bp.route("/api/shipping/rates", methods=["POST"])
+@token_required
+def get_shipping_rates(current_user):
+    """
+    Get shipping rates from multiple Terminal Africa carriers.
+    
+    Expected JSON body:
+    {
+        "origin_address_id": 123,  // Local address ID
+        "destination_address_id": 456,  // Local address ID
+        "items": [
+            {
+                "name": "Product Name",
+                "quantity": 2,
+                "value": 15000,
+                "weight": 2.5,
+                "description": "Product description"
+            }
+        ],
+        "packaging_id": "PKG-123",  // Terminal packaging ID (optional)
+        "currency": "NGN"
+    }
+    """
+    try:
+        data = request.get_json()
+        
+        # Validate required fields
+        if "origin_address_id" not in data:
+            return jsonify({
+                "status": "error",
+                "message": "'origin_address_id' is required"
+            }), 400
+        
+        if "destination_address_id" not in data:
+            return jsonify({
+                "status": "error",
+                "message": "'destination_address_id' is required"
+            }), 400
+        
+        if "items" not in data or not isinstance(data["items"], list) or len(data["items"]) == 0:
+            return jsonify({
+                "status": "error",
+                "message": "'items' is required and must be a non-empty array"
+            }), 400
+        
+        origin_address_id = data["origin_address_id"]
+        destination_address_id = data["destination_address_id"]
+        items = data["items"]
+        packaging_id = data.get("packaging_id")
+        currency = data.get("currency", "NGN")
+        
+        conn = get_db_connection()
+        try:
+            with conn.cursor() as cursor:
+                # Fetch origin address
+                cursor.execute(
+                    """
+                    SELECT * FROM shipping_addresses
+                    WHERE id = %s AND user_id = %s
+                    """,
+                    (origin_address_id, current_user["id"])
+                )
+                origin_address = cursor.fetchone()
+                
+                if not origin_address:
+                    return jsonify({
+                        "status": "error",
+                        "message": "Origin address not found"
+                    }), 404
+                
+                # Fetch destination address
+                cursor.execute(
+                    """
+                    SELECT * FROM shipping_addresses
+                    WHERE id = %s AND user_id = %s
+                    """,
+                    (destination_address_id, current_user["id"])
+                )
+                destination_address = cursor.fetchone()
+                
+                if not destination_address:
+                    return jsonify({
+                        "status": "error",
+                        "message": "Destination address not found"
+                    }), 404
+                
+                # Check if addresses are synced to Terminal
+                origin_terminal_id = origin_address.get("terminal_address_id")
+                dest_terminal_id = destination_address.get("terminal_address_id")
+                
+                if not origin_terminal_id or not dest_terminal_id:
+                    return jsonify({
+                        "status": "error",
+                        "message": "Both addresses must be synced to Terminal Africa first",
+                        "details": {
+                            "origin_synced": origin_terminal_id is not None,
+                            "destination_synced": dest_terminal_id is not None
+                        }
+                    }), 400
+                
+                # Calculate total weight and prepare items
+                total_weight = 0
+                terminal_items = []
+                
+                for item in items:
+                    weight = float(item.get("weight", 0.5))
+                    quantity = int(item.get("quantity", 1))
+                    value = float(item.get("value", 0))
+                    
+                    total_weight += weight * quantity
+                    
+                    terminal_items.append({
+                        "name": item.get("name", "Item"),
+                        "quantity": quantity,
+                        "value": value,
+                        "currency": currency,  # Add currency to each item
+                        "weight": weight,
+                        "description": item.get("description", item.get("name", "Item"))
+                    })
+                
+                # Get or create packaging
+                client = get_terminal_client()
+                
+                if not packaging_id:
+                    # Use default packaging or create one based on weight
+                    # For now, get first available packaging
+                    packaging_response = client.get_packaging(page=1, per_page=1)
+                    
+                    if 'data' in packaging_response:
+                        pkg_data = packaging_response['data']
+                        if isinstance(pkg_data, dict) and 'packaging' in pkg_data:
+                            packaging_list = pkg_data['packaging']
+                        else:
+                            packaging_list = pkg_data if isinstance(pkg_data, list) else []
+                    else:
+                        packaging_list = packaging_response if isinstance(packaging_response, list) else []
+                    
+                    if packaging_list and len(packaging_list) > 0:
+                        packaging_id = packaging_list[0].get('packaging_id') or packaging_list[0].get('id')
+                    else:
+                        return jsonify({
+                            "status": "error",
+                            "message": "No packaging options available. Please create a packaging first."
+                        }), 400
+                
+                # Create parcel
+                try:
+                    parcel_response = client.create_parcel(
+                        packaging_id=packaging_id,
+                        items=terminal_items,
+                        description=f"Shipment with {len(terminal_items)} items",
+                        weight=total_weight,
+                        weight_unit="kg"
+                    )
+                    
+                    parcel_data = parcel_response.get('data', parcel_response)
+                    parcel_id = parcel_data.get('parcel_id') or parcel_data.get('id')
+                    
+                    if not parcel_id:
+                        return jsonify({
+                            "status": "error",
+                            "message": "Failed to create parcel"
+                        }), 500
+                    
+                    # Get rates
+                    rates_response = client.get_rates(
+                        origin_address_id=origin_terminal_id,
+                        destination_address_id=dest_terminal_id,
+                        parcel_id=parcel_id,
+                        currency=currency
+                    )
+                    
+                    # Handle nested response
+                    if 'data' in rates_response:
+                        rates_data = rates_response['data']
+                        # data is directly a list of rates
+                        rates = rates_data if isinstance(rates_data, list) else []
+                    else:
+                        rates = rates_response if isinstance(rates_response, list) else []
+                    
+                    return jsonify({
+                        "status": "success",
+                        "message": "Shipping rates retrieved successfully",
+                        "data": {
+                            "rates": rates,
+                            "count": len(rates),
+                            "parcel_id": parcel_id,
+                            "summary": {
+                                "total_weight": total_weight,
+                                "total_items": len(terminal_items),
+                                "origin": f"{origin_address['city']}, {origin_address['state']}",
+                                "destination": f"{destination_address['city']}, {destination_address['state']}",
+                                "currency": currency
+                            }
+                        }
+                    }), 200
+                    
+                except TerminalAPIError as e:
+                    return jsonify({
+                        "status": "error",
+                        "message": f"Terminal API error: {e.message}",
+                        "error_code": e.status_code
+                    }), 500
+                    
+        finally:
+            conn.close()
+            
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": f"Server error: {str(e)}"
+        }), 500
+
+
+# ──────────────────────────────────────────────
+# SHIPPING QUOTES (Legacy Sendbox)
 # ──────────────────────────────────────────────
 
 @shipping_bp.route("/api/shipping/quotes", methods=["POST"])
