@@ -566,6 +566,83 @@ class TerminalClient:
         
         return response
     
+    def get_states(self, country_code: str = "NG") -> Dict:
+        """
+        Get list of states for a country.
+        
+        Args:
+            country_code: Country code (default: NG for Nigeria)
+            
+        Returns:
+            Dictionary with states list
+        """
+        params = {"country_code": country_code}
+        
+        logger.info(f"Fetching states for country: {country_code}")
+        
+        response = self._make_request(
+            method="GET",
+            endpoint="/states",
+            params=params
+        )
+        
+        return response
+    
+    def get_cities(self, country_code: str = "NG", state: str = None) -> Dict:
+        """
+        Get list of cities for a country/state.
+        
+        Args:
+            country_code: Country code (default: NG for Nigeria)
+            state: State name (optional) - will be mapped to state code for filtering
+            
+        Returns:
+            Dictionary with cities list
+        """
+        params = {"country_code": country_code}
+        
+        logger.info(f"Fetching cities for country: {country_code}, state: {state}")
+        
+        response = self._make_request(
+            method="GET",
+            endpoint="/cities",
+            params=params
+        )
+        
+        # If state is provided, filter cities by state code
+        if state and 'data' in response:
+            cities_data = response['data']
+            if isinstance(cities_data, list):
+                # Create state name to code mapping
+                state_code_map = {
+                    'Abia': 'AB', 'Abuja': 'FC', 'Adamawa': 'AD', 'Akwa Ibom': 'AK',
+                    'Anambra': 'AN', 'Bauchi': 'BA', 'Bayelsa': 'BY', 'Benue': 'BE',
+                    'Borno': 'BO', 'Cross River': 'CR', 'Delta': 'DE', 'Ebonyi': 'EB',
+                    'Edo': 'ED', 'Ekiti': 'EK', 'Enugu': 'EN', 'Gombe': 'GO',
+                    'Imo': 'IM', 'Jigawa': 'JI', 'Kaduna': 'KD', 'Kano': 'KN',
+                    'Katsina': 'KT', 'Kebbi': 'KE', 'Kogi': 'KO', 'Kwara': 'KW',
+                    'Lagos': 'LA', 'Nasarawa': 'NA', 'Niger': 'NI', 'Ogun': 'OG',
+                    'Ondo': 'ON', 'Osun': 'OS', 'Oyo': 'OY', 'Plateau': 'PL',
+                    'Rivers': 'RI', 'Sokoto': 'SO', 'Taraba': 'TA', 'Yobe': 'YO',
+                    'Zamfara': 'ZA'
+                }
+                
+                # Get state code for the provided state name
+                state_code = state_code_map.get(state)
+                
+                if state_code:
+                    # Filter cities by state code
+                    filtered_cities = [
+                        city for city in cities_data 
+                        if isinstance(city, dict) and city.get('stateCode') == state_code
+                    ]
+                    response['data'] = filtered_cities
+                    logger.info(f"Filtered {len(filtered_cities)} cities for state {state} (code: {state_code})")
+                else:
+                    logger.warning(f"Unknown state name: {state}")
+        
+        return response
+    
     # ==================== RATE MANAGEMENT ====================
     
     def get_rates(

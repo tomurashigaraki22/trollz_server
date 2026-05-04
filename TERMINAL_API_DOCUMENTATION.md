@@ -225,7 +225,73 @@ Authorization: Bearer {token}
 
 ## Phase 4: Shipping Quotes & Rates
 
-### 1. Get Carriers
+### 1. Get States
+
+List all Nigerian states with their details (public endpoint).
+
+```http
+GET /api/shipping/states
+Query Parameters:
+  - country_code: NG (default)
+```
+
+**Response:**
+```json
+{
+  "status": "success",
+  "message": "States retrieved successfully for NG",
+  "data": {
+    "states": [
+      {
+        "name": "Lagos",
+        "isoCode": "LA",
+        "countryCode": "NG",
+        "latitude": "6.52437930",
+        "longitude": "3.37920570",
+        "state_id": "JYMK526U3GGF"
+      }
+    ],
+    "count": 37,
+    "country_code": "NG"
+  }
+}
+```
+
+### 2. Get Cities
+
+List cities, optionally filtered by state (public endpoint).
+
+```http
+GET /api/shipping/cities
+Query Parameters:
+  - country_code: NG (default)
+  - state: State name (optional, e.g., "Lagos")
+```
+
+**Response:**
+```json
+{
+  "status": "success",
+  "message": "Cities retrieved successfully",
+  "data": {
+    "cities": [
+      {
+        "name": "Agege",
+        "stateCode": "LA",
+        "countryCode": "NG",
+        "latitude": "6.6252564",
+        "longitude": "3.3112093",
+        "city_id": "O04WLJ"
+      }
+    ],
+    "count": 46,
+    "country_code": "NG",
+    "state": "Lagos"
+  }
+}
+```
+
+### 3. Get Carriers
 
 List all available carriers with filtering options.
 
@@ -264,7 +330,7 @@ Query Parameters:
 }
 ```
 
-### 2. Get Packaging Options
+### 4. Get Packaging Options
 
 List all available packaging options.
 
@@ -306,7 +372,7 @@ Query Parameters:
 }
 ```
 
-### 3. Create Custom Packaging
+### 5. Create Custom Packaging
 
 ```http
 POST /api/shipping/packaging

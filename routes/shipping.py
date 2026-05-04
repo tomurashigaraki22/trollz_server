@@ -129,6 +129,119 @@ def get_carriers(current_user):
 
 
 # ──────────────────────────────────────────────
+# TERMINAL AFRICA - STATES & CITIES
+# ──────────────────────────────────────────────
+
+@shipping_bp.route("/api/shipping/states", methods=["GET"])
+def get_states():
+    """
+    Get list of states for a country (public endpoint).
+    
+    Query Parameters:
+        - country_code: Country code (default: NG for Nigeria)
+    
+    Returns:
+        List of states
+    """
+    try:
+        country_code = request.args.get("country_code", "NG")
+        
+        client = get_terminal_client()
+        
+        try:
+            response = client.get_states(country_code=country_code)
+            
+            # Handle nested response
+            if 'data' in response:
+                states_data = response['data']
+                if isinstance(states_data, dict) and 'states' in states_data:
+                    states = states_data['states']
+                else:
+                    states = states_data if isinstance(states_data, list) else []
+            else:
+                states = response if isinstance(response, list) else []
+            
+            return jsonify({
+                "status": "success",
+                "message": f"States retrieved successfully for {country_code}",
+                "data": {
+                    "states": states,
+                    "count": len(states),
+                    "country_code": country_code
+                }
+            }), 200
+            
+        except TerminalAPIError as e:
+            return jsonify({
+                "status": "error",
+                "message": f"Terminal API error: {e.message}",
+                "error_code": e.status_code
+            }), 500
+            
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": f"Server error: {str(e)}"
+        }), 500
+
+
+@shipping_bp.route("/api/shipping/cities", methods=["GET"])
+def get_cities():
+    """
+    Get list of cities for a country/state (public endpoint).
+    
+    Query Parameters:
+        - country_code: Country code (default: NG for Nigeria)
+        - state: State name (optional)
+    
+    Returns:
+        List of cities
+    """
+    try:
+        country_code = request.args.get("country_code", "NG")
+        state = request.args.get("state")
+        
+        client = get_terminal_client()
+        
+        try:
+            response = client.get_cities(country_code=country_code, state=state)
+            
+            # Handle nested response
+            if 'data' in response:
+                cities_data = response['data']
+                if isinstance(cities_data, dict) and 'cities' in cities_data:
+                    cities = cities_data['cities']
+                else:
+                    cities = cities_data if isinstance(cities_data, list) else []
+            else:
+                cities = response if isinstance(response, list) else []
+            
+            return jsonify({
+                "status": "success",
+                "message": f"Cities retrieved successfully",
+                "data": {
+                    "cities": cities,
+                    "count": len(cities),
+                    "country_code": country_code,
+                    "state": state
+                }
+            }), 200
+            
+        except TerminalAPIError as e:
+            return jsonify({
+                "status": "error",
+                "message": f"Terminal API error: {e.message}",
+                "error_code": e.status_code
+            }), 500
+            
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": f"Server error: {str(e)}"
+        }), 500
+
+
+# ──────────────────────────────────────────────
 # TERMINAL AFRICA - PACKAGING
 # ──────────────────────────────────────────────
 
