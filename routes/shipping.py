@@ -17,6 +17,31 @@ import json
 shipping_bp = Blueprint("shipping", __name__)
 
 
+def get_warehouse_address_id():
+    """Get the warehouse address ID from database."""
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cursor:
+            # Find warehouse address by email
+            cursor.execute(
+                """
+                SELECT sa.id, sa.terminal_address_id 
+                FROM shipping_addresses sa
+                JOIN users u ON sa.user_id = u.id
+                WHERE u.email = %s
+                """,
+                ("warehouse@trollzstore.com",)
+            )
+            warehouse = cursor.fetchone()
+            
+            if warehouse and warehouse.get("terminal_address_id"):
+                return warehouse["id"], warehouse["terminal_address_id"]
+            else:
+                raise Exception("Warehouse address not found or not synced to Terminal Africa")
+    finally:
+        conn.close()
+
+
 def _serialize_quote(row):
     """Convert DB row to JSON-safe quote dict."""
     if row is None:
@@ -395,7 +420,6 @@ def get_shipping_rates(current_user):
     
     Expected JSON body:
     {
-        "origin_address_id": 123,  // Local address ID
         "destination_address_id": 456,  // Local address ID
         "items": [
             {
@@ -409,17 +433,13 @@ def get_shipping_rates(current_user):
         "packaging_id": "PKG-123",  // Terminal packaging ID (optional)
         "currency": "NGN"
     }
+    
+    Note: Origin address is automatically set to warehouse address
     """
     try:
         data = request.get_json()
         
         # Validate required fields
-        if "origin_address_id" not in data:
-            return jsonify({
-                "status": "error",
-                "message": "'origin_address_id' is required"
-            }), 400
-        
         if "destination_address_id" not in data:
             return jsonify({
                 "status": "error",
@@ -432,30 +452,38 @@ def get_shipping_rates(current_user):
                 "message": "'items' is required and must be a non-empty array"
             }), 400
         
-        origin_address_id = data["origin_address_id"]
         destination_address_id = data["destination_address_id"]
         items = data["items"]
         packaging_id = data.get("packaging_id")
         currency = data.get("currency", "NGN")
         
+        # Get warehouse address (origin)
+        try:
+            warehouse_id, warehouse_terminal_id = get_warehouse_address_id()
+        except Exception as e:
+            return jsonify({
+                "status": "error",
+                "message": f"Warehouse address error: {str(e)}"
+            }), 500
+        
         conn = get_db_connection()
         try:
             with conn.cursor() as cursor:
-                # Fetch origin address
+                # Fetch warehouse address details for display
                 cursor.execute(
                     """
                     SELECT * FROM shipping_addresses
-                    WHERE id = %s AND user_id = %s
+                    WHERE id = %s
                     """,
-                    (origin_address_id, current_user["id"])
+                    (warehouse_id,)
                 )
                 origin_address = cursor.fetchone()
                 
                 if not origin_address:
                     return jsonify({
                         "status": "error",
-                        "message": "Origin address not found"
-                    }), 404
+                        "message": "Warehouse address not found in database"
+                    }), 500
                 
                 # Fetch destination address
                 cursor.execute(
@@ -473,17 +501,15 @@ def get_shipping_rates(current_user):
                         "message": "Destination address not found"
                     }), 404
                 
-                # Check if addresses are synced to Terminal
-                origin_terminal_id = origin_address.get("terminal_address_id")
+                # Check if destination address is synced to Terminal
                 dest_terminal_id = destination_address.get("terminal_address_id")
                 
-                if not origin_terminal_id or not dest_terminal_id:
+                if not dest_terminal_id:
                     return jsonify({
                         "status": "error",
-                        "message": "Both addresses must be synced to Terminal Africa first",
+                        "message": "Destination address must be synced to Terminal Africa first",
                         "details": {
-                            "origin_synced": origin_terminal_id is not None,
-                            "destination_synced": dest_terminal_id is not None
+                            "destination_synced": False
                         }
                     }), 400
                 
@@ -551,9 +577,9 @@ def get_shipping_rates(current_user):
                             "message": "Failed to create parcel"
                         }), 500
                     
-                    # Get rates
+                    # Get rates using warehouse as origin
                     rates_response = client.get_rates(
-                        origin_address_id=origin_terminal_id,
+                        origin_address_id=warehouse_terminal_id,
                         destination_address_id=dest_terminal_id,
                         parcel_id=parcel_id,
                         currency=currency
@@ -574,10 +600,11 @@ def get_shipping_rates(current_user):
                             "rates": rates,
                             "count": len(rates),
                             "parcel_id": parcel_id,
+                            "warehouse_address_id": warehouse_id,
                             "summary": {
                                 "total_weight": total_weight,
                                 "total_items": len(terminal_items),
-                                "origin": f"{origin_address['city']}, {origin_address['state']}",
+                                "origin": f"{origin_address['city']}, {origin_address['state']} (Warehouse)",
                                 "destination": f"{destination_address['city']}, {destination_address['state']}",
                                 "currency": currency
                             }
@@ -1239,7 +1266,6 @@ def create_shipment(current_user):
     Expected JSON body:
     {
         "rate_id": "RT-ABC123",  // Terminal rate ID from rates endpoint
-        "origin_address_id": 15,  // Local address ID
         "destination_address_id": 14,  // Local address ID
         "parcel_id": "PC-XYZ789",  // Terminal parcel ID from rates endpoint
         "metadata": {  // Optional
@@ -1247,12 +1273,14 @@ def create_shipment(current_user):
             "customer_notes": "Handle with care"
         }
     }
+    
+    Note: Origin address is automatically set to warehouse address
     """
     try:
         data = request.get_json()
         
         # Validate required fields
-        required = ["rate_id", "origin_address_id", "destination_address_id", "parcel_id"]
+        required = ["rate_id", "destination_address_id", "parcel_id"]
         for field in required:
             if field not in data:
                 return jsonify({
@@ -1261,24 +1289,23 @@ def create_shipment(current_user):
                 }), 400
         
         rate_id = data["rate_id"]
-        origin_address_id = data["origin_address_id"]
         destination_address_id = data["destination_address_id"]
         parcel_id = data["parcel_id"]
         metadata = data.get("metadata", {})
         
+        # Get warehouse address (origin)
+        try:
+            warehouse_id, warehouse_terminal_id = get_warehouse_address_id()
+        except Exception as e:
+            return jsonify({
+                "status": "error",
+                "message": f"Warehouse address error: {str(e)}"
+            }), 500
+        
         conn = get_db_connection()
         try:
             with conn.cursor() as cursor:
-                # Verify addresses belong to user and are synced
-                cursor.execute(
-                    """
-                    SELECT terminal_address_id FROM shipping_addresses
-                    WHERE id = %s AND user_id = %s
-                    """,
-                    (origin_address_id, current_user["id"])
-                )
-                origin = cursor.fetchone()
-                
+                # Verify destination address belongs to user and is synced
                 cursor.execute(
                     """
                     SELECT terminal_address_id FROM shipping_addresses
@@ -1288,25 +1315,25 @@ def create_shipment(current_user):
                 )
                 destination = cursor.fetchone()
                 
-                if not origin or not destination:
+                if not destination:
                     return jsonify({
                         "status": "error",
-                        "message": "One or both addresses not found"
+                        "message": "Destination address not found"
                     }), 404
                 
-                if not origin["terminal_address_id"] or not destination["terminal_address_id"]:
+                if not destination["terminal_address_id"]:
                     return jsonify({
                         "status": "error",
-                        "message": "Both addresses must be synced to Terminal Africa"
+                        "message": "Destination address must be synced to Terminal Africa"
                     }), 400
                 
-                # Create shipment via Terminal
+                # Create shipment via Terminal using warehouse as origin
                 client = get_terminal_client()
                 
                 try:
                     shipment_response = client.create_shipment(
                         rate_id=rate_id,
-                        origin_address_id=origin["terminal_address_id"],
+                        origin_address_id=warehouse_terminal_id,
                         destination_address_id=destination["terminal_address_id"],
                         parcel_id=parcel_id,
                         metadata=metadata
@@ -1319,7 +1346,8 @@ def create_shipment(current_user):
                         "status": "success",
                         "message": "Shipment created successfully",
                         "data": {
-                            "shipment": shipment_data
+                            "shipment": shipment_data,
+                            "warehouse_address_id": warehouse_id
                         }
                     }), 201
                     

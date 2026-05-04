@@ -414,7 +414,7 @@ Content-Type: application/json
 
 ### 4. Get Shipping Rates (Multi-Carrier)
 
-Get shipping rates from multiple carriers simultaneously.
+Get shipping rates from multiple carriers simultaneously. **Origin address is automatically set to warehouse.**
 
 ```http
 POST /api/shipping/rates
@@ -422,7 +422,6 @@ Authorization: Bearer {token}
 Content-Type: application/json
 
 {
-  "origin_address_id": 15,
   "destination_address_id": 14,
   "items": [
     {
@@ -474,10 +473,11 @@ Content-Type: application/json
     ],
     "count": 3,
     "parcel_id": "PC-SSEFA533A9NR6JC1",
+    "warehouse_address_id": 19,
     "summary": {
       "total_weight": 3.0,
       "total_items": 2,
-      "origin": "Abuja, Abuja",
+      "origin": "Owerri, Imo (Warehouse)",
       "destination": "Lagos, Lagos",
       "currency": "NGN"
     }
@@ -486,10 +486,12 @@ Content-Type: application/json
 ```
 
 **Important Notes:**
+- **Origin is automatically set to warehouse address** (Owerri, Imo)
 - Response time: 5-30 seconds (fetching from multiple carriers)
-- Both addresses must be synced to Terminal Africa
+- Destination address must be synced to Terminal Africa
 - Returns rates from 3-5 carriers typically
 - `parcel_id` is required for shipment creation
+- `warehouse_address_id` shows which warehouse address was used
 
 ---
 
@@ -497,7 +499,7 @@ Content-Type: application/json
 
 ### 1. Create Shipment
 
-Create a shipment from a selected rate.
+Create a shipment from a selected rate. **Origin address is automatically set to warehouse.**
 
 ```http
 POST /api/shipping/shipments
@@ -506,7 +508,6 @@ Content-Type: application/json
 
 {
   "rate_id": "RT-Q4ZBR49K2OZ3LK8L",
-  "origin_address_id": 15,
   "destination_address_id": 14,
   "parcel_id": "PC-SSEFA533A9NR6JC1",
   "metadata": {
@@ -531,7 +532,8 @@ Content-Type: application/json
       "amount": 3547.50,
       "currency": "NGN",
       "created_at": "2026-05-04T14:30:00Z"
-    }
+    },
+    "warehouse_address_id": 19
   }
 }
 ```
@@ -979,7 +981,7 @@ const addressId = addressData.data.address.id;
 #### Step 3: Get Shipping Rates
 
 ```javascript
-// Get rates from multiple carriers
+// Get rates from multiple carriers (origin automatically set to warehouse)
 const ratesResponse = await fetch('http://localhost:4500/api/shipping/rates', {
   method: 'POST',
   headers: {
@@ -987,7 +989,6 @@ const ratesResponse = await fetch('http://localhost:4500/api/shipping/rates', {
     'Content-Type': 'application/json'
   },
   body: JSON.stringify({
-    origin_address_id: 15,
     destination_address_id: 14,
     items: [
       {

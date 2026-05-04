@@ -22,11 +22,27 @@ def token_required(f):
 
         try:
             data = jwt.decode(token, Config.JWT_SECRET, algorithms=["HS256"])
-            current_user = {
-                "id": data["user_id"],
-                "email": data["email"],
-                "type": data.get("type", "user"),
-            }
+            
+            # Handle both user and admin tokens
+            user_type = data.get("type", "user")
+            
+            if user_type == "admin":
+                # Admin tokens have username, not email
+                current_user = {
+                    "id": data["user_id"],
+                    "username": data.get("username", ""),
+                    "email": data.get("email", ""),  # May not exist for admin
+                    "type": "admin",
+                    "role": data.get("role", "admin"),
+                }
+            else:
+                # User tokens have email
+                current_user = {
+                    "id": data["user_id"],
+                    "email": data.get("email", ""),
+                    "username": data.get("username", ""),  # May not exist for user
+                    "type": data.get("type", "user"),
+                }
         except jwt.ExpiredSignatureError:
             return (
                 jsonify({"status": "error", "message": "Token has expired"}),

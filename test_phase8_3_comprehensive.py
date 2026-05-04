@@ -112,7 +112,6 @@ def test_phase4_rates(headers, origin, dest):
     print_section("PHASE 4: Get Shipping Rates")
     
     rate_request = {
-        "origin_address_id": origin['id'],
         "destination_address_id": dest['id'],
         "items": [
             {
@@ -191,7 +190,6 @@ def test_phase5_create_shipment(headers, rate, parcel_id, origin, dest):
     
     shipment_request = {
         "rate_id": rate.get('rate_id'),
-        "origin_address_id": origin['id'],
         "destination_address_id": dest['id'],
         "parcel_id": parcel_id,
         "metadata": {
