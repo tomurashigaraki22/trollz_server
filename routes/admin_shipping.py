@@ -1,6 +1,7 @@
 """
 Admin Shipping Routes
-Advanced admin features for Sendbox shipment management, reports, and account monitoring.
+Legacy admin shipping endpoints for backward compatibility.
+Current shipping integration should use Terminal Africa routes in `routes/shipping.py`.
 """
 
 from flask import Blueprint, request, jsonify

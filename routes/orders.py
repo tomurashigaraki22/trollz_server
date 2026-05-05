@@ -226,7 +226,7 @@ def create_checkout(current_user):
                         data["payment_method"],
                         data.get("transaction_id"),
                         payment_status,
-                        "processing",
+                        "processing" if payment_status == "paid" else "pending",
                         "Pending",
                         address_string,
                         address_id,
@@ -601,6 +601,42 @@ def get_all_orders(current_admin):
         finally:
             conn.close()
             
+    except Exception as e:
+        return jsonify({"status": "error", "message": f"Server error: {str(e)}"}), 500
+
+
+@orders_bp.route("/api/admin/orders/<int:order_id>", methods=["GET"])
+@admin_required
+def get_admin_order_details(current_admin, order_id):
+    """Get full order details for a specific order (admin only)."""
+    try:
+        conn = get_db_connection()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "SELECT * FROM orders WHERE id = %s",
+                    (order_id,)
+                )
+                order = cursor.fetchone()
+
+                if not order:
+                    return jsonify({"status": "error", "message": "Order not found"}), 404
+
+                cursor.execute(
+                    "SELECT * FROM order_items WHERE order_id = %s",
+                    (order_id,)
+                )
+                items = cursor.fetchall()
+
+                order_data = _serialize_order(order)
+                order_data["items"] = [_serialize_order_item(item) for item in items]
+
+                return jsonify({
+                    "status": "success",
+                    "data": {"order": order_data}
+                }), 200
+        finally:
+            conn.close()
     except Exception as e:
         return jsonify({"status": "error", "message": f"Server error: {str(e)}"}), 500
 
@@ -1046,6 +1082,85 @@ def get_sendbox_details(current_admin, order_id):
         finally:
             conn.close()
             
+    except Exception as e:
+        return jsonify({"status": "error", "message": f"Server error: {str(e)}"}), 500
+
+
+@orders_bp.route("/api/admin/statistics", methods=["GET"])
+@admin_required
+def get_admin_statistics(current_admin):
+    """Get admin dashboard statistics (admin only)."""
+    try:
+        conn = get_db_connection()
+        try:
+            with conn.cursor() as cursor:
+                # Total users
+                cursor.execute("SELECT COUNT(*) as total FROM users")
+                total_users = cursor.fetchone()["total"]
+                
+                # Total orders
+                cursor.execute("SELECT COUNT(*) as total FROM orders")
+                total_orders = cursor.fetchone()["total"]
+                
+                # Total products
+                cursor.execute("SELECT COUNT(*) as total FROM product")
+                total_products = cursor.fetchone()["total"]
+                
+                # Total revenue (sum of total_amount where payment_status is 'paid')
+                cursor.execute("SELECT SUM(total_amount) as total FROM orders WHERE payment_status = 'paid'")
+                total_revenue = cursor.fetchone()["total"] or 0
+                
+                # Order status breakdown
+                cursor.execute("""
+                    SELECT order_status, COUNT(*) as count
+                    FROM orders
+                    GROUP BY order_status
+                """)
+                order_status_breakdown = cursor.fetchall()
+                
+                # Payment status breakdown
+                cursor.execute("""
+                    SELECT payment_status, COUNT(*) as count
+                    FROM orders
+                    GROUP BY payment_status
+                """)
+                payment_status_breakdown = cursor.fetchall()
+                
+                # Recent orders (last 7 days)
+                from datetime import datetime, timedelta
+                seven_days_ago = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
+                cursor.execute("""
+                    SELECT COUNT(*) as count, SUM(total_amount) as revenue
+                    FROM orders
+                    WHERE created_at >= %s
+                """, (seven_days_ago,))
+                recent_orders = cursor.fetchone()
+                
+                return jsonify({
+                    "status": "success",
+                    "data": {
+                        "summary": {
+                            "total_users": total_users,
+                            "total_orders": total_orders,
+                            "total_products": total_products,
+                            "total_revenue": float(total_revenue) if total_revenue else 0
+                        },
+                        "order_status_breakdown": [
+                            {"status": s["order_status"], "count": s["count"]}
+                            for s in order_status_breakdown
+                        ],
+                        "payment_status_breakdown": [
+                            {"status": s["payment_status"], "count": s["count"]}
+                            for s in payment_status_breakdown
+                        ],
+                        "last_7_days": {
+                            "orders_count": recent_orders["count"],
+                            "revenue": float(recent_orders["revenue"] or 0)
+                        }
+                    }
+                }), 200
+        finally:
+            conn.close()
     except Exception as e:
         return jsonify({"status": "error", "message": f"Server error: {str(e)}"}), 500
 
